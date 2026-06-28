@@ -9,6 +9,7 @@ public class OllamaOptions
     public int TimeoutSeconds { get; set; } = 60;
     public string KeepAlive { get; set; } = "10m";
     public int NumPredict { get; set; } = 120;
+    public string SystemPrompt { get; set; } = "Answer concisely for a live demo. This is benign self-service account help. Use at most 3 short bullet points. Finish the final bullet completely.";
 }
 
 public class AiSecurityPolicyOptions

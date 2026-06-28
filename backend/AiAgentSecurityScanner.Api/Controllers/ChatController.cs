@@ -9,7 +9,7 @@ namespace AiAgentSecurityScanner.Api.Controllers;
 
 [ApiController]
 [Route("api/chat")]
-public class ChatController(IChatGatewayService chatGateway, AppDbContext db) : ControllerBase
+public class ChatController(IChatGatewayService chatGateway, AppDbContext db, ILogger<ChatController> logger) : ControllerBase
 {
     [HttpPost]
     public async Task<ActionResult<ChatResponse>> Send(ChatRequest request, CancellationToken cancellationToken)
@@ -21,6 +21,12 @@ public class ChatController(IChatGatewayService chatGateway, AppDbContext db) : 
             request,
             HttpContext.Connection.RemoteIpAddress?.ToString(),
             cancellationToken);
+
+        logger.LogInformation(
+            "Chat API returning response. RequestId={RequestId} ResponseLengthReturnedByApi={ResponseLengthReturnedByApi} CacheHit={CacheHit}",
+            response.RequestId,
+            response.Response.Length,
+            response.CacheHit);
 
         return Ok(response);
     }
@@ -48,6 +54,9 @@ public class ChatController(IChatGatewayService chatGateway, AppDbContext db) : 
                 x.PromptTokens,
                 x.ResponseTokens,
                 x.TotalTokens,
+                x.LlmTokensUsed > 0 ? x.LlmTokensUsed : (!x.CacheHit ? (x.TotalTokens ?? 0) : 0),
+                x.TokensSaved > 0 ? x.TokensSaved : (x.CacheHit ? (x.PromptTokens ?? 0) + (x.ResponseTokens ?? 0) : 0),
+                x.CachedTokensServed > 0 ? x.CachedTokensServed : (x.CacheHit ? (x.PromptTokens ?? 0) + (x.ResponseTokens ?? 0) : 0),
                 x.CacheHit,
                 x.ExactCacheHit,
                 x.SemanticCacheHit,

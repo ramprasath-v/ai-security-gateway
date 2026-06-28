@@ -13,6 +13,9 @@ public class ChatRequestLog
     public int? PromptTokens { get; set; }
     public int? ResponseTokens { get; set; }
     public int? TotalTokens { get; set; }
+    public int LlmTokensUsed { get; set; }
+    public int TokensSaved { get; set; }
+    public int CachedTokensServed { get; set; }
     public bool CacheHit { get; set; }
     public bool ExactCacheHit { get; set; }
     public bool SemanticCacheHit { get; set; }

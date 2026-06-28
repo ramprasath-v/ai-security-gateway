@@ -31,6 +31,9 @@ public class DashboardController(AppDbContext db) : ControllerBase
                 x.PromptTokens,
                 x.ResponseTokens,
                 x.TotalTokens,
+                x.LlmTokensUsed > 0 ? x.LlmTokensUsed : (!x.CacheHit ? (x.TotalTokens ?? 0) : 0),
+                x.TokensSaved > 0 ? x.TokensSaved : (x.CacheHit ? (x.PromptTokens ?? 0) + (x.ResponseTokens ?? 0) : 0),
+                x.CachedTokensServed > 0 ? x.CachedTokensServed : (x.CacheHit ? (x.PromptTokens ?? 0) + (x.ResponseTokens ?? 0) : 0),
                 x.CacheHit,
                 x.ExactCacheHit,
                 x.SemanticCacheHit,
@@ -84,10 +87,15 @@ public class DashboardController(AppDbContext db) : ControllerBase
                 .OrderByDescending(x => x.TimestampUtc)
                 .Select(x => (DateTime?)x.TimestampUtc)
                 .FirstOrDefaultAsync(cancellationToken),
-            await db.ChatRequestLogs.SumAsync(x => (long?)(x.TotalTokens ?? 0), cancellationToken) ?? 0,
             await db.ChatRequestLogs
-                .Where(x => x.TotalTokens != null)
-                .Select(x => (double)x.TotalTokens!.Value)
+                .SumAsync(x => (long?)(x.LlmTokensUsed > 0 ? x.LlmTokensUsed : (!x.CacheHit ? (x.TotalTokens ?? 0) : 0)), cancellationToken) ?? 0,
+            await db.ChatRequestLogs
+                .SumAsync(x => (long?)(x.TokensSaved > 0 ? x.TokensSaved : (x.CacheHit ? (x.PromptTokens ?? 0) + (x.ResponseTokens ?? 0) : 0)), cancellationToken) ?? 0,
+            await db.ChatRequestLogs
+                .SumAsync(x => (long?)(x.CachedTokensServed > 0 ? x.CachedTokensServed : (x.CacheHit ? (x.PromptTokens ?? 0) + (x.ResponseTokens ?? 0) : 0)), cancellationToken) ?? 0,
+            await db.ChatRequestLogs
+                .Where(x => !x.CacheHit && (x.LlmTokensUsed > 0 || x.TotalTokens != null))
+                .Select(x => (double)(x.LlmTokensUsed > 0 ? x.LlmTokensUsed : (x.TotalTokens ?? 0)))
                 .DefaultIfEmpty()
                 .AverageAsync(cancellationToken),
             await db.ChatRequestLogs.CountAsync(x => x.CacheHit, cancellationToken),

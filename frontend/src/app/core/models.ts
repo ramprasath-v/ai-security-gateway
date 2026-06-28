@@ -28,6 +28,9 @@ export interface ChatResponse {
   promptTokens?: number;
   responseTokens?: number;
   totalTokens?: number;
+  llmTokensUsed: number;
+  tokensSaved: number;
+  cachedTokensServed: number;
   cacheHit: boolean;
   exactCacheHit: boolean;
   semanticCacheHit: boolean;
@@ -53,6 +56,9 @@ export interface ChatHistoryItem {
   promptTokens?: number;
   responseTokens?: number;
   totalTokens?: number;
+  llmTokensUsed: number;
+  tokensSaved: number;
+  cachedTokensServed: number;
   cacheHit: boolean;
   exactCacheHit: boolean;
   semanticCacheHit: boolean;
@@ -72,6 +78,8 @@ export interface Dashboard {
   slowestRequestMs?: number;
   lastRequestTime?: string;
   totalTokensUsed: number;
+  totalTokensSaved: number;
+  totalCachedTokensServed: number;
   averageTokensPerRequest: number;
   cacheHitCount: number;
   exactCacheHitCount: number;

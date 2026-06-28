@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Diagnostics;
 using AiAgentSecurityScanner.Api.Data;
 using AiAgentSecurityScanner.Api.Models;
 using Microsoft.EntityFrameworkCore;
@@ -32,28 +33,51 @@ public class SemanticCacheService(
     IOptions<SemanticCacheOptions> options,
     ILogger<SemanticCacheService> logger) : ISemanticCacheService
 {
+    private const int LegacyTruncatedResponseTokenLimit = 120;
+
     public async Task<SemanticCacheLookupResult> LookupAsync(string prompt, string model, string policyDecision, CancellationToken cancellationToken)
     {
+        var stopwatch = Stopwatch.StartNew();
         var normalized = normalizer.Normalize(prompt);
         var cacheKey = $"{model.Trim().ToLowerInvariant()}|{policyDecision}|{normalized}";
         if (!options.Value.Enabled)
+        {
+            stopwatch.Stop();
+            logger.LogInformation("Semantic cache lookup disabled. Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs}", model, policyDecision, stopwatch.ElapsedMilliseconds);
             return new(false, false, false, null, null, null, null, null, cacheKey, normalized, null);
+        }
 
-        var exact = await db.SemanticCacheEntries
+        var exactMatches = await db.SemanticCacheEntries
             .AsNoTracking()
             .Where(x => x.Model == model && x.PolicyDecision == policyDecision && x.NormalizedPrompt == normalized)
             .OrderByDescending(x => x.CreatedAtUtc)
-            .FirstOrDefaultAsync(cancellationToken);
+            .Take(10)
+            .ToListAsync(cancellationToken);
 
+        var exact = exactMatches.FirstOrDefault(x => !LooksLikeLegacyTruncatedResponse(x));
         if (exact is not null)
         {
-            logger.LogInformation("Exact cache hit. Model={Model} PolicyDecision={PolicyDecision}", model, policyDecision);
+            stopwatch.Stop();
+            logger.LogInformation("Semantic cache lookup complete. Result=ExactHit Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs} CachedResponseLength={CachedResponseLength}", model, policyDecision, stopwatch.ElapsedMilliseconds, exact.CachedResponse.Length);
             return new(true, true, false, 1.0, exact.CachedResponse, exact.PromptTokens, exact.ResponseTokens, exact.TotalTokens, cacheKey, normalized, null);
+        }
+
+        if (exactMatches.Count > 0)
+        {
+            logger.LogWarning(
+                "Bypassing exact cache entries that look truncated. Model={Model} PolicyDecision={PolicyDecision} BypassedCount={BypassedCount}",
+                model,
+                policyDecision,
+                exactMatches.Count);
         }
 
         var embedding = await embeddingService.GenerateEmbeddingAsync(normalized, cancellationToken);
         if (embedding is null || embedding.Length == 0)
+        {
+            stopwatch.Stop();
+            logger.LogInformation("Semantic cache lookup complete. Result=MissNoEmbedding Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs}", model, policyDecision, stopwatch.ElapsedMilliseconds);
             return new(false, false, false, null, null, null, null, null, cacheKey, normalized, null);
+        }
 
         var candidates = await db.SemanticCacheEntries
             .AsNoTracking()
@@ -64,8 +88,15 @@ public class SemanticCacheService(
 
         SemanticCacheEntry? best = null;
         double bestScore = 0;
+        var skippedTruncatedCandidates = 0;
         foreach (var candidate in candidates)
         {
+            if (LooksLikeLegacyTruncatedResponse(candidate))
+            {
+                skippedTruncatedCandidates++;
+                continue;
+            }
+
             float[]? candidateEmbedding;
             try { candidateEmbedding = JsonSerializer.Deserialize<float[]>(candidate.EmbeddingJson); }
             catch { continue; }
@@ -81,11 +112,13 @@ public class SemanticCacheService(
 
         if (best is not null && bestScore >= options.Value.SimilarityThreshold)
         {
-            logger.LogInformation("Semantic cache hit. Model={Model} PolicyDecision={PolicyDecision} Similarity={Similarity}", model, policyDecision, bestScore);
+            stopwatch.Stop();
+            logger.LogInformation("Semantic cache lookup complete. Result=SemanticHit Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs} Similarity={Similarity} CandidateCount={CandidateCount} SkippedTruncatedCandidates={SkippedTruncatedCandidates} CachedResponseLength={CachedResponseLength}", model, policyDecision, stopwatch.ElapsedMilliseconds, bestScore, candidates.Count, skippedTruncatedCandidates, best.CachedResponse.Length);
             return new(true, false, true, bestScore, best.CachedResponse, best.PromptTokens, best.ResponseTokens, best.TotalTokens, cacheKey, normalized, embedding);
         }
 
-        logger.LogInformation("Cache miss. Model={Model} PolicyDecision={PolicyDecision} BestSimilarity={Similarity}", model, policyDecision, best is null ? null : bestScore);
+        stopwatch.Stop();
+        logger.LogInformation("Semantic cache lookup complete. Result=Miss Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs} BestSimilarity={Similarity} CandidateCount={CandidateCount} SkippedTruncatedCandidates={SkippedTruncatedCandidates}", model, policyDecision, stopwatch.ElapsedMilliseconds, best is null ? null : bestScore, candidates.Count, skippedTruncatedCandidates);
         return new(false, false, false, best is null ? null : bestScore, null, null, null, null, cacheKey, normalized, embedding);
     }
 
@@ -94,6 +127,12 @@ public class SemanticCacheService(
         if (!options.Value.Enabled) return;
         embedding ??= await embeddingService.GenerateEmbeddingAsync(normalizedPrompt, cancellationToken);
         if (embedding is null || embedding.Length == 0) return;
+
+        logger.LogInformation(
+            "Saving complete response to semantic cache. Model={Model} PolicyDecision={PolicyDecision} ResponseLengthBeforeCaching={ResponseLengthBeforeCaching}",
+            model,
+            policyDecision,
+            response.Length);
 
         db.SemanticCacheEntries.Add(new SemanticCacheEntry
         {
@@ -121,5 +160,16 @@ public class SemanticCacheService(
             normB += b[i] * b[i];
         }
         return normA == 0 || normB == 0 ? 0 : dot / (Math.Sqrt(normA) * Math.Sqrt(normB));
+    }
+
+    private static bool LooksLikeLegacyTruncatedResponse(SemanticCacheEntry entry)
+    {
+        if (entry.ResponseTokens is null or < LegacyTruncatedResponseTokenLimit) return false;
+
+        var response = entry.CachedResponse.TrimEnd();
+        if (response.Length == 0) return true;
+
+        var last = response[^1];
+        return last is not ('.' or '!' or '?' or '"' or '\'' or ')' or ']' or '}');
     }
 }

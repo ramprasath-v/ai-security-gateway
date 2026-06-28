@@ -14,7 +14,9 @@ public record OllamaChatResult(
     long DurationMs,
     int? PromptTokens,
     int? ResponseTokens,
-    int? TotalTokens);
+    int? TotalTokens,
+    int StreamedChunksReceived,
+    string? DoneReason);
 
 public interface IOllamaService
 {
@@ -48,15 +50,18 @@ public class OllamaService(
         var stopwatch = Stopwatch.StartNew();
         var baseUrl = options.Value.BaseUrl.TrimEnd('/');
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/chat");
+        var messages = string.IsNullOrWhiteSpace(options.Value.SystemPrompt)
+            ? [new OllamaMessage("user", prompt)]
+            : new[] { new OllamaMessage("system", options.Value.SystemPrompt), new OllamaMessage("user", prompt) };
         var body = new OllamaChatRequest(
             model,
-            [new OllamaMessage("user", prompt)],
+            messages,
             false,
             options.Value.KeepAlive,
             new OllamaRequestOptions(options.Value.NumPredict));
         request.Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
 
-        logger.LogInformation("Ollama request starting. Model={Model} PromptLength={PromptLength}", model, prompt.Length);
+        logger.LogInformation("Ollama request starting. Model={Model} PromptLength={PromptLength} NumPredict={NumPredict} Stream={Stream}", model, prompt.Length, options.Value.NumPredict, false);
         using var response = await httpClientFactory.CreateClient("Ollama").SendAsync(request, cancellationToken);
         var payload = await response.Content.ReadAsStringAsync(cancellationToken);
         stopwatch.Stop();
@@ -64,17 +69,19 @@ public class OllamaService(
             throw new HttpRequestException($"Ollama returned {(int)response.StatusCode}: {payload}");
 
         var ollamaResponse = JsonSerializer.Deserialize<OllamaChatResponse>(payload, JsonOptions);
+        var content = ollamaResponse?.Message?.Content;
+        if (string.IsNullOrWhiteSpace(content))
+            content = payload;
         logger.LogInformation(
-            "Ollama request completed. Model={Model} StatusCode={StatusCode} DurationMs={DurationMs} PayloadLength={PayloadLength} PromptTokens={PromptTokens} ResponseTokens={ResponseTokens}",
+            "Ollama request completed. Model={Model} StatusCode={StatusCode} DurationMs={DurationMs} PayloadLength={PayloadLength} ResponseLength={ResponseLength} PromptTokens={PromptTokens} ResponseTokens={ResponseTokens} DoneReason={DoneReason}",
             model,
             (int)response.StatusCode,
             stopwatch.ElapsedMilliseconds,
             payload.Length,
+            content.Length,
             ollamaResponse?.PromptEvalCount,
-            ollamaResponse?.EvalCount);
-        var content = ollamaResponse?.Message?.Content;
-        if (string.IsNullOrWhiteSpace(content))
-            content = payload;
+            ollamaResponse?.EvalCount,
+            ollamaResponse?.DoneReason);
 
         int? totalTokens = ollamaResponse?.PromptEvalCount is null && ollamaResponse?.EvalCount is null
             ? null
@@ -87,7 +94,9 @@ public class OllamaService(
             stopwatch.ElapsedMilliseconds,
             ollamaResponse?.PromptEvalCount,
             ollamaResponse?.EvalCount,
-            totalTokens);
+            totalTokens,
+            1,
+            ollamaResponse?.DoneReason);
     }
 
     private record OllamaChatRequest(
@@ -106,6 +115,8 @@ public class OllamaService(
 
     private record OllamaChatResponse(
         [property: JsonPropertyName("message")] OllamaMessage? Message,
+        [property: JsonPropertyName("done")] bool Done,
+        [property: JsonPropertyName("done_reason")] string? DoneReason,
         [property: JsonPropertyName("prompt_eval_count")] int? PromptEvalCount,
         [property: JsonPropertyName("eval_count")] int? EvalCount);
 }

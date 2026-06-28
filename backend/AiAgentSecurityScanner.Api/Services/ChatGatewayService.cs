@@ -54,6 +54,9 @@ public partial class ChatGatewayService(
         int? promptTokens = null;
         int? responseTokens = null;
         int? totalTokens = null;
+        var llmTokensUsed = 0;
+        var tokensSaved = 0;
+        var cachedTokensServed = 0;
         var wasBlockedBeforeModelCall = decision.Action == "block";
         SemanticCacheLookupResult? cacheLookup = null;
         var cacheKey = (string?)null;
@@ -87,9 +90,17 @@ public partial class ChatGatewayService(
             if (cacheLookup.CacheHit && cacheLookup.CachedResponse is not null)
             {
                 responseText = cacheLookup.CachedResponse;
+                logger.LogInformation(
+                    "Gateway response served from cache. CacheKey={CacheKey} ExactCacheHit={ExactCacheHit} SemanticCacheHit={SemanticCacheHit} CachedResponseLength={CachedResponseLength}",
+                    cacheKey,
+                    exactCacheHit,
+                    semanticCacheHit,
+                    responseText.Length);
                 promptTokens = cacheLookup.PromptTokens;
                 responseTokens = cacheLookup.ResponseTokens;
-                totalTokens = cacheLookup.TotalTokens;
+                cachedTokensServed = TokenTotal(cacheLookup.PromptTokens, cacheLookup.ResponseTokens, cacheLookup.TotalTokens) ?? 0;
+                tokensSaved = cachedTokensServed;
+                totalTokens = 0;
             }
             else
             {
@@ -101,9 +112,16 @@ public partial class ChatGatewayService(
                     ollamaDurationMs = ollama.DurationMs;
                     promptTokens = ollama.PromptTokens;
                     responseTokens = ollama.ResponseTokens;
-                    totalTokens = ollama.TotalTokens;
-                    if (status == "Completed")
+                    totalTokens = TokenTotal(ollama.PromptTokens, ollama.ResponseTokens, ollama.TotalTokens);
+                    llmTokensUsed = totalTokens ?? 0;
+                    if (status == "Completed" && IsCompleteOllamaResponse(ollama.DoneReason))
                     {
+                        logger.LogInformation(
+                            "Gateway response ready for cache. Model={Model} ResponseLengthBeforeCaching={ResponseLengthBeforeCaching} StreamedChunksReceived={StreamedChunksReceived} DoneReason={DoneReason}",
+                            model,
+                            responseText.Length,
+                            ollama.StreamedChunksReceived,
+                            ollama.DoneReason);
                         await semanticCacheService.SaveAsync(
                             prompt,
                             cacheLookup.NormalizedPrompt,
@@ -115,6 +133,15 @@ public partial class ChatGatewayService(
                             responseTokens,
                             totalTokens,
                             cancellationToken);
+                    }
+                    else if (status == "Completed")
+                    {
+                        logger.LogWarning(
+                            "Skipping semantic cache save for incomplete Ollama response. Model={Model} ResponseLengthBeforeCaching={ResponseLengthBeforeCaching} StreamedChunksReceived={StreamedChunksReceived} DoneReason={DoneReason}",
+                            model,
+                            responseText.Length,
+                            ollama.StreamedChunksReceived,
+                            ollama.DoneReason);
                     }
                 }
                 catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
@@ -136,6 +163,9 @@ public partial class ChatGatewayService(
             PromptTokens = promptTokens,
             ResponseTokens = responseTokens,
             TotalTokens = totalTokens,
+            LlmTokensUsed = llmTokensUsed,
+            TokensSaved = tokensSaved,
+            CachedTokensServed = cachedTokensServed,
             CacheHit = cacheHit,
             ExactCacheHit = exactCacheHit,
             SemanticCacheHit = semanticCacheHit,
@@ -190,16 +220,20 @@ public partial class ChatGatewayService(
         await db.SaveChangesAsync(cancellationToken);
 
         logger.LogInformation(
-            "Gateway request completed. RequestId={RequestId} Model={Model} Status={Status} PolicyAction={PolicyAction} PromptLength={PromptLength} ResponseLength={ResponseLength} PromptTokens={PromptTokens} ResponseTokens={ResponseTokens} TotalTokens={TotalTokens} CacheHit={CacheHit} ExactCacheHit={ExactCacheHit} SemanticCacheHit={SemanticCacheHit} SimilarityScore={SimilarityScore} PolicyCheckDurationMs={PolicyCheckDurationMs} OllamaDurationMs={OllamaDurationMs} DatabaseDurationMs={DatabaseDurationMs} TotalDurationMs={TotalDurationMs}",
+            "Gateway request completed. RequestId={RequestId} Model={Model} Status={Status} PolicyAction={PolicyAction} PromptLength={PromptLength} ResponseLength={ResponseLength} ResponseLengthReturnedByGateway={ResponseLengthReturnedByGateway} PromptTokens={PromptTokens} ResponseTokens={ResponseTokens} TotalTokens={TotalTokens} LlmTokensUsed={LlmTokensUsed} TokensSaved={TokensSaved} CachedTokensServed={CachedTokensServed} CacheHit={CacheHit} ExactCacheHit={ExactCacheHit} SemanticCacheHit={SemanticCacheHit} SimilarityScore={SimilarityScore} PolicyCheckDurationMs={PolicyCheckDurationMs} OllamaDurationMs={OllamaDurationMs} DatabaseDurationMs={DatabaseDurationMs} TotalDurationMs={TotalDurationMs}",
             log.Id,
             model,
             status,
             decision.Action,
             promptLength,
             responseText.Length,
+            responseText.Length,
             promptTokens,
             responseTokens,
             totalTokens,
+            llmTokensUsed,
+            tokensSaved,
+            cachedTokensServed,
             cacheHit,
             exactCacheHit,
             semanticCacheHit,
@@ -227,6 +261,9 @@ public partial class ChatGatewayService(
             promptTokens,
             responseTokens,
             totalTokens,
+            llmTokensUsed,
+            tokensSaved,
+            cachedTokensServed,
             cacheHit,
             exactCacheHit,
             semanticCacheHit,
@@ -260,6 +297,19 @@ public partial class ChatGatewayService(
     {
         if (maxLength <= 0) return string.Empty;
         return value.Length <= maxLength ? value : value[..maxLength];
+    }
+
+    private static int? TokenTotal(int? promptTokens, int? responseTokens, int? reportedTotal)
+    {
+        if (promptTokens is not null || responseTokens is not null)
+            return (promptTokens ?? 0) + (responseTokens ?? 0);
+
+        return reportedTotal;
+    }
+
+    private static bool IsCompleteOllamaResponse(string? doneReason)
+    {
+        return string.IsNullOrWhiteSpace(doneReason) || string.Equals(doneReason, "stop", StringComparison.OrdinalIgnoreCase);
     }
 
     [GeneratedRegex(@"\s+")]
