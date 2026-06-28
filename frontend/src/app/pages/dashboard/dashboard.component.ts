@@ -9,28 +9,27 @@ import { ApiService } from '../../core/api.service';
   template: `
     <section class="page-head">
       <div>
+        <span class="demo-kicker">Live Demo Dashboard</span>
         <h2>Gateway Dashboard</h2>
-        <p>Only real requests logged by the SQLite database are shown here.</p>
+        <p>Real SQLite telemetry from previous AI Gateway requests — no mock data.</p>
       </div>
       <a routerLink="/" class="button secondary">Open chat</a>
     </section>
 
     @if(dashboard$ | async; as d) {
       <div class="stats">
-        <article class="stat"><span class="stat-icon">↗</span><div><b>{{d.totalRequests}}</b><span>Total requests</span></div></article>
-        <article class="stat"><span class="stat-icon success">✓</span><div><b>{{d.successCount}}</b><span>Successful</span></div></article>
-        <article class="stat"><span class="stat-icon danger">■</span><div><b>{{d.blockedCount}}</b><span>Blocked</span></div></article>
-        <article class="stat"><span class="stat-icon warning">!</span><div><b>{{d.policyViolations}}</b><span>Policy actions</span></div></article>
-        <article class="stat"><span class="stat-icon danger">●</span><div><b>{{d.sensitiveDataFindings}}</b><span>Sensitive findings</span></div></article>
-        <article class="stat"><span class="stat-icon">⏱</span><div><b>{{d.averageResponseTimeMs | number:'1.0-0'}} ms</b><span>Average response</span></div></article>
-        <article class="stat"><span class="stat-icon">⚡</span><div><b>{{d.fastestRequestMs ?? 0}} ms</b><span>Fastest request</span></div></article>
-        <article class="stat"><span class="stat-icon warning">⌛</span><div><b>{{d.slowestRequestMs ?? 0}} ms</b><span>Slowest request</span></div></article>
-        <article class="stat"><span class="stat-icon">◌</span><div><b>{{d.totalTokensUsed}}</b><span>Total tokens</span></div></article>
-        <article class="stat"><span class="stat-icon">◇</span><div><b>{{d.averageTokensPerRequest | number:'1.0-0'}}</b><span>Avg tokens/request</span></div></article>
-        <article class="stat"><span class="stat-icon success">↩</span><div><b>{{d.cacheHitCount}}</b><span>Cache hits</span></div></article>
-        <article class="stat"><span class="stat-icon success">=</span><div><b>{{d.exactCacheHitCount}}</b><span>Exact hits</span></div></article>
-        <article class="stat"><span class="stat-icon success">≈</span><div><b>{{d.semanticCacheHitCount}}</b><span>Semantic hits</span></div></article>
-        <article class="stat"><span class="stat-icon">↪</span><div><b>{{d.cacheMissCount}}</b><span>Cache misses</span></div></article>
+        <article class="stat hero"><span class="stat-icon">↗</span><div><b>{{d.totalRequests}}</b><span>Total requests</span><small>Gateway traffic</small></div></article>
+        <article class="stat"><span class="stat-icon success">✓</span><div><b>{{d.successCount}}</b><span>Allowed</span><small>Completed requests</small></div></article>
+        <article class="stat"><span class="stat-icon danger">⛔</span><div><b>{{d.blockedCount}}</b><span>Blocked</span><small>Stopped by policy</small></div></article>
+        <article class="stat"><span class="stat-icon warning">⚠</span><div><b>{{d.policyViolations}}</b><span>Policy decisions</span><small>Non-allow actions</small></div></article>
+        <article class="stat"><span class="stat-icon danger">●</span><div><b>{{d.sensitiveDataFindings}}</b><span>Sensitive findings</span><small>PII/secrets detected</small></div></article>
+        <article class="stat"><span class="stat-icon">⏱</span><div><b>{{d.averageResponseTimeMs | number:'1.0-0'}} ms</b><span>Average response</span><small>End-to-end gateway</small></div></article>
+        <article class="stat"><span class="stat-icon success">⚡</span><div><b>{{d.fastestRequestMs ?? 0}} ms</b><span>Fastest</span><small>Often cache-backed</small></div></article>
+        <article class="stat"><span class="stat-icon warning">⌛</span><div><b>{{d.slowestRequestMs ?? 0}} ms</b><span>Slowest</span><small>Likely Ollama call</small></div></article>
+        <article class="stat"><span class="stat-icon">◌</span><div><b>{{d.totalTokensUsed}}</b><span>Total tokens</span><small>Ollama reported</small></div></article>
+        <article class="stat"><span class="stat-icon">◇</span><div><b>{{d.averageTokensPerRequest | number:'1.0-0'}}</b><span>Avg tokens</span><small>Per request</small></div></article>
+        <article class="stat"><span class="stat-icon success">↩</span><div><b>{{d.cacheHitCount}}</b><span>Cache hits</span><small>Exact + semantic</small></div></article>
+        <article class="stat"><span class="stat-icon success">≈</span><div><b>{{d.semanticCacheHitCount}}</b><span>Semantic hits</span><small>Similarity matched</small></div></article>
       </div>
       <p class="dashboard-note">Last request: {{d.lastRequestTime ? (d.lastRequestTime | date:'medium') : 'No requests yet'}}</p>
 
@@ -73,10 +72,10 @@ import { ApiService } from '../../core/api.service';
                     <td>{{item.timestampUtc | date:'short'}}</td>
                     <td class="preview">{{item.promptPreview}}</td>
                     <td>{{item.model}}</td>
-                    <td>{{item.policyAction}}</td>
+                    <td><span [class]="'badge '+policyTone(item.policyAction)">{{item.policyAction}}</span></td>
                     <td>{{item.riskScore}}</td>
-                    <td>{{item.totalDurationMs ?? 0}}</td>
-                    <td>{{item.ollamaDurationMs ?? '—'}}</td>
+                    <td [class]="durationTone(item.totalDurationMs)">{{item.totalDurationMs ?? 0}}</td>
+                    <td [class]="durationTone(item.ollamaDurationMs)">{{item.ollamaDurationMs ?? '—'}}</td>
                     <td>{{item.promptTokens ?? '—'}}</td>
                     <td>{{item.responseTokens ?? '—'}}</td>
                     <td>{{item.totalTokens ?? '—'}}</td>
@@ -85,7 +84,7 @@ import { ApiService } from '../../core/api.service';
                         {{item.exactCacheHit ? 'exact' : item.semanticCacheHit ? 'semantic' : item.cacheHit ? 'hit' : 'miss'}}
                       </span>
                     </td>
-                    <td>{{item.similarityScore == null ? '—' : (item.similarityScore | number:'1.2-3')}}</td>
+                    <td><span [class]="item.semanticCacheHit ? 'similarity hot' : 'similarity'">{{item.similarityScore == null ? '—' : (item.similarityScore | number:'1.2-3')}}</span></td>
                     <td class="error-cell">{{item.errorMessage || item.status}}</td>
                   </tr>
                 } @empty {
@@ -101,4 +100,15 @@ import { ApiService } from '../../core/api.service';
 export class DashboardComponent {
   private api = inject(ApiService);
   dashboard$ = this.api.dashboard();
+
+  policyTone(policy: string) {
+    return policy === 'block' ? 'danger' : policy === 'mask' ? 'warning' : 'success';
+  }
+
+  durationTone(value?: number | null) {
+    if (value == null) return 'duration neutral';
+    if (value > 5000) return 'duration slow';
+    if (value > 1000) return 'duration medium';
+    return 'duration fast';
+  }
 }
