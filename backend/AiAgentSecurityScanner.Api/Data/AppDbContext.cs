@@ -10,12 +10,16 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<ChatSession> ChatSessions => Set<ChatSession>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<SemanticCacheEntry> SemanticCacheEntries => Set<SemanticCacheEntry>();
+    public DbSet<SecurityPolicy> SecurityPolicies => Set<SecurityPolicy>();
+    public DbSet<AiApplication> AiApplications => Set<AiApplication>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<ChatRequestLog>().HasIndex(x => x.TimestampUtc);
         modelBuilder.Entity<ChatRequestLog>().HasIndex(x => x.Model);
         modelBuilder.Entity<ChatRequestLog>().HasIndex(x => x.PolicyAction);
+        modelBuilder.Entity<ChatRequestLog>().HasIndex(x => x.ApplicationId);
+        modelBuilder.Entity<ChatRequestLog>().HasIndex(x => x.ApplicationName);
         modelBuilder.Entity<ChatRequestLog>().HasIndex(x => x.CacheKey);
         modelBuilder.Entity<ChatRequestLog>().HasIndex(x => x.CacheHit);
         modelBuilder.Entity<ChatRequestLog>().HasIndex(x => x.ExactCacheHit);
@@ -38,5 +42,9 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
         modelBuilder.Entity<SemanticCacheEntry>().HasIndex(x => x.PolicyDecision);
         modelBuilder.Entity<SemanticCacheEntry>().HasIndex(x => x.NormalizedPrompt);
         modelBuilder.Entity<SemanticCacheEntry>().HasIndex(x => x.CreatedAtUtc);
+        modelBuilder.Entity<SecurityPolicy>().HasIndex(x => x.FindingType);
+        modelBuilder.Entity<SecurityPolicy>().HasIndex(x => x.Enabled);
+        modelBuilder.Entity<AiApplication>().HasIndex(x => x.AppKey).IsUnique();
+        modelBuilder.Entity<AiApplication>().HasIndex(x => x.Enabled);
     }
 }

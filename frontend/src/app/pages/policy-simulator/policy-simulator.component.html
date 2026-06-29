@@ -1,0 +1,88 @@
+<section class="page-head">
+  <div>
+    <h2>Policy Simulator</h2>
+    <p>Run detection and policy evaluation without calling Ollama.</p>
+  </div>
+  <a routerLink="/dashboard" class="button secondary">Dashboard</a>
+</section>
+
+<section class="simulator-layout">
+  <article class="panel">
+    <h3>Prompt</h3>
+    <form class="simulator-form" (ngSubmit)="simulate()">
+      <textarea
+        name="prompt"
+        [(ngModel)]="prompt"
+        [disabled]="loading"
+        placeholder="Paste a prompt to evaluate..."
+        rows="9"
+      ></textarea>
+      <div class="composer-actions">
+        <button class="button primary" [disabled]="loading || !prompt.trim()">
+          {{ loading ? "Simulating..." : "Run simulation" }}
+        </button>
+      </div>
+    </form>
+
+    <div class="sample-row">
+      <button class="prompt-chip safe" type="button" (click)="useSafeSample()">
+        <b>Safe</b><span>No sensitive data</span>
+      </button>
+      <button class="prompt-chip danger" type="button" (click)="useSecretSample()">
+        <b>Secret</b><span>API key + email</span>
+      </button>
+      <button class="prompt-chip semantic" type="button" (click)="useMaskSample()">
+        <b>Mask</b><span>Email + phone</span>
+      </button>
+    </div>
+  </article>
+
+  <article class="panel">
+    <h3>Decision</h3>
+    @if (error) {
+      <p class="empty">{{ error }}</p>
+    } @else if (result) {
+      <div class="decision-summary">
+        <span [class]="'badge ' + decisionTone(result.decision)">
+          {{ result.decision }}
+        </span>
+        <b>{{ result.riskScore }}</b>
+        <span>Risk score</span>
+      </div>
+
+      @if (result.reason) {
+        <p class="dashboard-note">{{ result.reason }}</p>
+      }
+
+      @if (result.maskedPreview) {
+        <h3>Masked preview</h3>
+        <pre class="preview-box">{{ result.maskedPreview }}</pre>
+      }
+
+      <h3>Matched rules</h3>
+      @for (rule of result.matchedRules; track rule.ruleId) {
+        <div class="rule-row">
+          <div>
+            <b>{{ rule.name }}</b>
+            <span>{{ rule.explanation }}</span>
+          </div>
+          <span [class]="'badge ' + decisionTone(rule.outcome)">
+            {{ rule.outcome }}
+          </span>
+        </div>
+      }
+
+      <h3>Sensitive findings</h3>
+      @for (finding of result.findings; track finding.type + finding.description) {
+        <div class="metric-row">
+          <span>{{ finding.type }} · {{ finding.description }}</span>
+          <b>{{ finding.severity }}</b>
+        </div>
+      } @empty {
+        <p class="empty">No sensitive findings.</p>
+      }
+    } @else {
+      <p class="empty">Enter a prompt and run a simulation.</p>
+    }
+  </article>
+</section>

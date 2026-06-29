@@ -1,0 +1,123 @@
+<section class="page-head">
+  <div>
+    <h2>Policies</h2>
+  </div>
+  <button class="button secondary" type="button" (click)="loadPolicies()" [disabled]="loading">
+    Refresh
+  </button>
+</section>
+
+@if (error) {
+  <p class="error-banner">{{ error }}</p>
+}
+
+<section class="policy-builder-layout">
+  <article class="panel">
+    <h3>{{ editingId ? "Edit policy" : "Add policy" }}</h3>
+    <form class="policy-form" (ngSubmit)="save()">
+      <label>
+        <span>Name</span>
+        <input name="name" [(ngModel)]="form.name" [disabled]="saving" required />
+      </label>
+      <label>
+        <span>Description</span>
+        <textarea
+          name="description"
+          [(ngModel)]="form.description"
+          [disabled]="saving"
+          rows="3"
+        ></textarea>
+      </label>
+      <div class="form-grid">
+        <label>
+          <span>Finding type</span>
+          <select name="findingType" [(ngModel)]="form.findingType" [disabled]="saving">
+            @for (type of findingTypes; track type) {
+              <option [value]="type">{{ type }}</option>
+            }
+          </select>
+        </label>
+        <label>
+          <span>Action</span>
+          <select name="action" [(ngModel)]="form.action" [disabled]="saving">
+            @for (action of actions; track action) {
+              <option [value]="action">{{ action }}</option>
+            }
+          </select>
+        </label>
+      </div>
+      <div class="form-grid">
+        <label>
+          <span>Risk score</span>
+          <input
+            name="riskScore"
+            type="number"
+            min="0"
+            max="100"
+            [(ngModel)]="form.riskScore"
+            [disabled]="saving"
+          />
+        </label>
+        <label class="check-row">
+          <input name="enabled" type="checkbox" [(ngModel)]="form.enabled" [disabled]="saving" />
+          <span>Enabled</span>
+        </label>
+      </div>
+      <div class="composer-actions">
+        <button class="button primary" type="submit" [disabled]="saving || !form.name.trim()">
+          {{ saving ? "Saving..." : editingId ? "Update policy" : "Add policy" }}
+        </button>
+        @if (editingId) {
+          <button class="button secondary" type="button" (click)="cancelEdit()" [disabled]="saving">
+            Cancel
+          </button>
+        }
+      </div>
+    </form>
+  </article>
+
+  <article class="panel">
+    <h3>Existing policies</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Finding type</th>
+            <th>Action</th>
+            <th>Risk</th>
+            <th>Enabled</th>
+            <th>Description</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (policy of policies; track policy.id) {
+            <tr>
+              <td>{{ policy.name }}</td>
+              <td>{{ policy.findingType }}</td>
+              <td>
+                <span [class]="'badge ' + actionTone(policy.action)">
+                  {{ policy.action }}
+                </span>
+              </td>
+              <td>{{ policy.riskScore }}</td>
+              <td>{{ policy.enabled ? "Yes" : "No" }}</td>
+              <td class="preview">{{ policy.description || "—" }}</td>
+              <td class="row-actions">
+                <button class="button secondary" type="button" (click)="edit(policy)">Edit</button>
+                <button class="button secondary" type="button" (click)="delete(policy)">Delete</button>
+              </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="7" class="empty">
+                {{ loading ? "Loading policies..." : "No policies yet." }}
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>

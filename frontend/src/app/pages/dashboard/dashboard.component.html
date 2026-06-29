@@ -1,0 +1,367 @@
+<section class="page-head">
+  <div>
+    <!-- <span class="demo-kicker">Live Demo Dashboard</span> -->
+    <h2>Gateway Dashboard</h2>
+    <!-- <p>Real SQLite telemetry from previous AI Gateway requests — no mock data.</p> -->
+  </div>
+  <a routerLink="/" class="button secondary">Open chat</a>
+</section>
+
+@if (dashboard$ | async; as d) {
+  <div class="stats">
+    <article class="stat hero">
+      <span class="stat-icon">↗</span>
+      <div>
+        <b>{{ d.totalRequests }}</b>
+        <span>Total requests</span>
+        <small>Gateway traffic</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon success">✓</span>
+      <div>
+        <b>{{ d.successCount }}</b>
+        <span>Allowed</span>
+        <small>Completed requests</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon danger">⛔</span>
+      <div>
+        <b>{{ d.blockedCount }}</b>
+        <span>Blocked</span>
+        <small>Stopped by policy</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon danger">●</span>
+      <div>
+        <b>{{ d.blockedSecretsCount }}</b>
+        <span>Blocked secrets</span>
+        <small>Credential findings</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon warning">⚠</span>
+      <div>
+        <b>{{ d.policyViolations }}</b>
+        <span>Policy decisions</span>
+        <small>Non-allow actions</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon danger">●</span>
+      <div>
+        <b>{{ d.sensitiveDataFindings }}</b>
+        <span>Sensitive findings</span>
+        <small>PII/secrets detected</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon">⏱</span>
+      <div>
+        <b>{{ d.averageResponseTimeMs | number: "1.0-0" }} ms</b>
+        <span>Average response</span>
+        <small>End-to-end gateway</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon success">⚡</span>
+      <div>
+        <b>{{ d.fastestRequestMs ?? 0 }} ms</b>
+        <span>Fastest</span>
+        <small>Often cache-backed</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon warning">⌛</span>
+      <div>
+        <b>{{ d.slowestRequestMs ?? 0 }} ms</b>
+        <span>Slowest</span>
+        <small>Likely Ollama call</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon">◌</span>
+      <div>
+        <b>{{ d.totalTokensUsed }}</b>
+        <span>LLM tokens used</span>
+        <small>Cache hits count as zero</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon success">↯</span>
+      <div>
+        <b>{{ d.totalTokensSaved }}</b>
+        <span>Tokens saved</span>
+        <small>Exact + semantic cache</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon success">▣</span>
+      <div>
+        <b>{{ d.totalCachedTokensServed }}</b>
+        <span>Cached tokens served</span>
+        <small>Served without Ollama</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon">◇</span>
+      <div>
+        <b>{{ d.averageTokensPerRequest | number: "1.0-0" }}</b>
+        <span>Avg tokens</span>
+        <small>LLM tokens only</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon success">↩</span>
+      <div>
+        <b>{{ d.cacheHitCount }}</b>
+        <span>Cache hits</span>
+        <small>Exact + semantic</small>
+      </div>
+    </article>
+    <article class="stat">
+      <span class="stat-icon success">≈</span>
+      <div>
+        <b>{{ d.semanticCacheHitCount }}</b>
+        <span>Semantic hits</span>
+        <small>Similarity matched</small>
+      </div>
+    </article>
+  </div>
+  <p class="dashboard-note">
+    Last request:
+    {{
+      d.lastRequestTime
+        ? (d.lastRequestTime | date: "medium")
+        : "No requests yet"
+    }}
+  </p>
+
+  <section class="dashboard-grid">
+    <article class="panel">
+      <h3>Requests by application</h3>
+      @for (item of d.applicationUsage; track item.applicationName + item.environment) {
+        <div class="metric-row">
+          <span>{{ item.applicationName }} / {{ item.environment }}</span>
+          <b>{{ item.count }}</b>
+        </div>
+      } @empty {
+        <p class="empty">No application usage yet.</p>
+      }
+    </article>
+
+    <article class="panel">
+      <h3>Violations by application</h3>
+      @for (item of d.violationsByApplication; track item.applicationName + item.environment) {
+        <div class="metric-row">
+          <span>{{ item.applicationName }} / {{ item.environment }}</span>
+          <b>{{ item.count }}</b>
+        </div>
+      } @empty {
+        <p class="empty">No application violations yet.</p>
+      }
+    </article>
+
+    <article class="panel">
+      <h3>Tokens by application</h3>
+      @for (item of d.tokensByApplication; track item.applicationName + item.environment) {
+        <div class="metric-row">
+          <span>{{ item.applicationName }} / {{ item.environment }}</span>
+          <b>{{ item.llmTokensUsed }} used · {{ item.tokensSaved }} saved</b>
+        </div>
+      } @empty {
+        <p class="empty">No application tokens yet.</p>
+      }
+    </article>
+
+    <article class="panel">
+      <h3>Average duration by application</h3>
+      @for (item of d.averageDurationByApplication; track item.applicationName + item.environment) {
+        <div class="metric-row">
+          <span>{{ item.applicationName }} / {{ item.environment }}</span>
+          <b>{{ item.averageDurationMs | number: "1.0-0" }} ms</b>
+        </div>
+      } @empty {
+        <p class="empty">No application duration yet.</p>
+      }
+    </article>
+
+    <article class="panel">
+      <h3>Requests by provider</h3>
+      @for (item of d.providerUsage; track item.provider) {
+        <div class="metric-row">
+          <span>{{ item.provider }}</span>
+          <b>{{ item.count }}</b>
+        </div>
+      } @empty {
+        <p class="empty">No provider usage yet.</p>
+      }
+    </article>
+
+    <article class="panel">
+      <h3>Average duration by provider</h3>
+      @for (item of d.averageDurationByProvider; track item.provider) {
+        <div class="metric-row">
+          <span>{{ item.provider }}</span>
+          <b>{{ item.averageDurationMs | number: "1.0-0" }} ms</b>
+        </div>
+      } @empty {
+        <p class="empty">No provider duration yet.</p>
+      }
+    </article>
+
+    <article class="panel">
+      <h3>Tokens by provider</h3>
+      @for (item of d.tokensByProvider; track item.provider) {
+        <div class="metric-row">
+          <span>{{ item.provider }}</span>
+          <b>{{ item.llmTokensUsed }} used · {{ item.tokensSaved }} saved</b>
+        </div>
+      } @empty {
+        <p class="empty">No provider tokens yet.</p>
+      }
+    </article>
+
+    <article class="panel">
+      <h3>Model usage</h3>
+      @for (item of d.modelUsage; track item.model) {
+        <div class="metric-row">
+          <span>{{ item.model }}</span>
+          <b>{{ item.count }}</b>
+        </div>
+      } @empty {
+        <p class="empty">No model usage yet.</p>
+      }
+    </article>
+
+    <article class="panel">
+      <h3>Policy decision breakdown</h3>
+      @for (item of d.policyActions; track item.action) {
+        <div class="metric-row">
+          <span>{{ item.action }}</span>
+          <b>{{ item.count }}</b>
+        </div>
+      } @empty {
+        <p class="empty">No policy actions yet.</p>
+      }
+    </article>
+
+    <article class="panel">
+      <h3>Top finding types</h3>
+      @for (item of d.findingTypes; track item.type) {
+        <div class="metric-row">
+          <span>{{ item.type }}</span>
+          <b>{{ item.count }}</b>
+        </div>
+      } @empty {
+        <p class="empty">No sensitive data findings yet.</p>
+      }
+    </article>
+
+    <article class="panel">
+      <h3>Recent high-risk prompts</h3>
+      @for (item of d.recentHighRiskRequests; track item.id) {
+        <div class="metric-row stacked-row">
+          <span class="preview">{{ item.promptPreview }}</span>
+          <b>{{ item.riskScore }}</b>
+        </div>
+      } @empty {
+        <p class="empty">No high-risk prompts yet.</p>
+      }
+    </article>
+
+    <article class="panel">
+      <h3>Recent requests</h3>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Local time</th>
+              <th>Prompt preview</th>
+              <th>Application</th>
+              <th>Provider</th>
+              <th>Model</th>
+              <th>Policy</th>
+              <th>Matched policy</th>
+              <th>Risk</th>
+              <th>Total ms</th>
+              <th>Ollama ms</th>
+              <th>Prompt tokens</th>
+              <th>Response tokens</th>
+              <th>LLM tokens used</th>
+              <th>Tokens saved</th>
+              <th>Cached tokens served</th>
+              <th>Cache</th>
+              <th>Similarity</th>
+              <th>Status / error</th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (item of d.recentRequests; track item.id) {
+              <tr>
+                <td>{{ item.timestampUtc | date: "short" }}</td>
+                <td class="preview">{{ item.promptPreview }}</td>
+                <td>{{ item.applicationName || "—" }}</td>
+                <td>{{ item.provider }}</td>
+                <td>{{ item.model }}</td>
+                <td>
+                  <span [class]="'badge ' + policyTone(item.policyAction)">
+                    {{ item.policyAction }}
+                  </span>
+                </td>
+                <td>{{ item.matchedPolicyName || "—" }}</td>
+                <td>{{ item.riskScore }}</td>
+                <td [class]="durationTone(item.totalDurationMs)">
+                  {{ item.totalDurationMs ?? 0 }}
+                </td>
+                <td [class]="durationTone(item.ollamaDurationMs)">
+                  {{ item.ollamaDurationMs ?? "—" }}
+                </td>
+                <td>{{ item.promptTokens ?? "—" }}</td>
+                <td>{{ item.responseTokens ?? "—" }}</td>
+                <td>{{ item.llmTokensUsed }}</td>
+                <td>{{ item.tokensSaved }}</td>
+                <td>{{ item.cachedTokensServed }}</td>
+                <td>
+                  <span [class]="item.cacheHit ? 'pill hit' : 'pill miss'">
+                    {{
+                      item.exactCacheHit
+                        ? "exact"
+                        : item.semanticCacheHit
+                          ? "semantic"
+                          : item.cacheHit
+                            ? "hit"
+                            : "miss"
+                    }}
+                  </span>
+                </td>
+                <td>
+                  <span
+                    [class]="
+                      item.semanticCacheHit ? 'similarity hot' : 'similarity'
+                    "
+                  >
+                    {{
+                      item.similarityScore == null
+                        ? "—"
+                        : (item.similarityScore | number: "1.2-3")
+                    }}
+                  </span>
+                </td>
+                <td class="error-cell">
+                  {{ item.errorMessage || item.status }}
+                </td>
+              </tr>
+            } @empty {
+              <tr>
+                <td colspan="18" class="empty">No requests yet.</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+}

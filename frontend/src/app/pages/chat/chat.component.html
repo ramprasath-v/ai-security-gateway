@@ -1,0 +1,177 @@
+<section class="page-head">
+  <div>
+    <!-- <span class="demo-kicker">Demo Mode</span> -->
+    <h2>Secure AI Chat</h2>
+    <!-- <p>
+      Run the sample prompts to populate the dashboard with real SQLite
+      request data.
+    </p> -->
+  </div>
+  <button
+    class="button secondary"
+    type="button"
+    (click)="newChat()"
+    [disabled]="loading"
+  >
+    ＋ New chat
+  </button>
+</section>
+
+<section class="chat-layout">
+  <aside class="panel sessions-panel">
+    <h3>Chats</h3>
+    <div class="session-list">
+      @for (session of sessions; track session.id) {
+        <button
+          type="button"
+          [class.active]="session.id === activeSessionId"
+          (click)="selectSession(session.id)"
+          [disabled]="loading"
+        >
+          <b>{{ session.title }}</b>
+          <span>{{ session.updatedAtUtc | date: "short" }}</span>
+        </button>
+      } @empty {
+        <p>No chats yet.</p>
+      }
+    </div>
+  </aside>
+
+  <article class="panel chat-panel">
+    <div class="chat-messages" #messagesEl>
+      @for (message of messages; track $index) {
+        <div [class]="'message ' + message.role">
+          <div
+            class="bubble"
+            [class.loading]="message.loading"
+            [class.error]="message.error"
+          >
+            @if (message.loading) {
+              <span class="typing"><i></i><i></i><i></i></span>
+            }
+            <p>{{ message.content }}</p>
+            @if (message.badges?.length) {
+              <div class="badge-row">
+                @for (badge of message.badges; track badge.label) {
+                  <span [class]="'badge ' + badge.tone">{{ badge.label }}</span>
+                }
+              </div>
+            }
+            @if (message.createdAtUtc) {
+              <small>{{ message.createdAtUtc | date: "short" }}</small>
+            }
+            @if (message.meta) {
+              <small>{{ message.meta }}</small>
+            }
+            @if (message.findings?.length) {
+              <div class="finding-list">
+                @for (finding of message.findings; track finding) {
+                  <span>{{ finding }}</span>
+                }
+              </div>
+            }
+          </div>
+        </div>
+      }
+    </div>
+
+    <form class="composer" (ngSubmit)="send()">
+      <textarea
+        name="prompt"
+        [(ngModel)]="prompt"
+        [disabled]="loading"
+        placeholder="Ask something..."
+        rows="4"
+      ></textarea>
+      <div class="composer-actions">
+        <div class="selector-row">
+          <select
+            name="application"
+            [(ngModel)]="selectedApplicationId"
+            [disabled]="loading"
+          >
+            @for (application of applications; track application.id) {
+              <option [value]="application.id">
+                {{ application.name }} / {{ application.environment }}
+              </option>
+            }
+          </select>
+          <select name="provider" [(ngModel)]="provider" [disabled]="loading">
+            <option value="Ollama">Ollama</option>
+          </select>
+          <select name="model" [(ngModel)]="model" [disabled]="loading">
+            <option value="llama3.2:1b">llama3.2:1b</option>
+            <option value="qwen2.5:0.5b">qwen2.5:0.5b (faster)</option>
+          </select>
+        </div>
+        <button class="button primary" [disabled]="loading || !prompt.trim()">
+          {{ loading ? "Thinking..." : "Send" }}
+        </button>
+      </div>
+    </form>
+  </article>
+
+  <aside class="panel helper-panel">
+    <h3>Try these</h3>
+    <button
+      class="prompt-chip safe"
+      type="button"
+      (click)="useSafe()"
+      [disabled]="loading"
+    >
+      <b>Safe request</b><span>Allowed by policy</span>
+    </button>
+    <button
+      class="prompt-chip danger"
+      type="button"
+      (click)="useRisky()"
+      [disabled]="loading"
+    >
+      <b>Sensitive request</b><span>SSN + password blocked</span>
+    </button>
+    <button
+      class="prompt-chip danger"
+      type="button"
+      (click)="useFinancePrompt()"
+      [disabled]="loading"
+    >
+      <b>Finance Assistant</b><span>Credit card policy test</span>
+    </button>
+    <button
+      class="prompt-chip safe"
+      type="button"
+      (click)="useCodePrompt()"
+      [disabled]="loading"
+    >
+      <b>Code Assistant</b><span>Safe code review prompt</span>
+    </button>
+    <button
+      class="prompt-chip safe"
+      type="button"
+      (click)="useServiceDeskPrompt()"
+      [disabled]="loading"
+    >
+      <b>Service Desk Agent</b><span>Password reset ticket prompt</span>
+    </button>
+    <button
+      class="prompt-chip semantic"
+      type="button"
+      (click)="useSemanticSeed()"
+      [disabled]="loading"
+    >
+      <b>Semantic cache seed</b><span>First request creates cache</span>
+    </button>
+    <button
+      class="prompt-chip semantic"
+      type="button"
+      (click)="useSemanticFollowup()"
+      [disabled]="loading"
+    >
+      <b>Semantic cache follow-up</b><span>Similar prompt for cache hit</span>
+    </button>
+    <p>
+      Dashboard cards update from real request logs: policy, tokens, response
+      time, similarity score, and cache hit or miss.
+    </p>
+  </aside>
+</section>

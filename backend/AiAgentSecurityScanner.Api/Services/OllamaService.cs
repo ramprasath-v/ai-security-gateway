@@ -7,30 +7,17 @@ using Microsoft.Extensions.Options;
 
 namespace AiAgentSecurityScanner.Api.Services;
 
-public record OllamaChatResult(
-    string Model,
-    string Content,
-    HttpStatusCode StatusCode,
-    long DurationMs,
-    int? PromptTokens,
-    int? ResponseTokens,
-    int? TotalTokens,
-    int StreamedChunksReceived,
-    string? DoneReason);
-
-public interface IOllamaService
-{
-    Task<OllamaChatResult> ChatAsync(string prompt, string? requestedModel, CancellationToken cancellationToken);
-}
-
-public class OllamaService(
+public class OllamaLLMProvider(
     IHttpClientFactory httpClientFactory,
     IOptions<OllamaOptions> options,
-    ILogger<OllamaService> logger) : IOllamaService
+    IOptions<SemanticCacheOptions> cacheOptions,
+    ILogger<OllamaLLMProvider> logger) : ILLMProvider
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+    public string ProviderName => "Ollama";
+    public string ModelName => options.Value.DefaultModel;
 
-    public async Task<OllamaChatResult> ChatAsync(string prompt, string? requestedModel, CancellationToken cancellationToken)
+    public async Task<LLMChatResult> SendChatAsync(string prompt, string? requestedModel, CancellationToken cancellationToken)
     {
         var configured = options.Value;
         var primaryModel = string.IsNullOrWhiteSpace(requestedModel) ? configured.DefaultModel : requestedModel.Trim();
@@ -45,7 +32,45 @@ public class OllamaService(
         }
     }
 
-    private async Task<OllamaChatResult> SendAsync(string model, string prompt, CancellationToken cancellationToken)
+    public async Task<float[]?> GetEmbeddingAsync(string normalizedPrompt, CancellationToken cancellationToken)
+    {
+        var model = cacheOptions.Value.EmbeddingModel;
+        var stopwatch = Stopwatch.StartNew();
+        try
+        {
+            var baseUrl = options.Value.BaseUrl.TrimEnd('/');
+            using var request = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/api/embeddings");
+            request.Content = new StringContent(
+                JsonSerializer.Serialize(new EmbeddingRequest(model, normalizedPrompt), JsonOptions),
+                Encoding.UTF8,
+                "application/json");
+
+            logger.LogInformation("Embedding request starting. Provider={Provider} Model={Model} PromptLength={PromptLength}", ProviderName, model, normalizedPrompt.Length);
+            using var response = await httpClientFactory.CreateClient("Ollama").SendAsync(request, cancellationToken);
+            var payload = await response.Content.ReadAsStringAsync(cancellationToken);
+            stopwatch.Stop();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                logger.LogWarning("Embedding request failed. Provider={Provider} Model={Model} StatusCode={StatusCode} DurationMs={DurationMs} Payload={Payload}",
+                    ProviderName, model, (int)response.StatusCode, stopwatch.ElapsedMilliseconds, payload);
+                return null;
+            }
+
+            var parsed = JsonSerializer.Deserialize<EmbeddingResponse>(payload, JsonOptions);
+            logger.LogInformation("Embedding request completed. Provider={Provider} Model={Model} DurationMs={DurationMs} Dimensions={Dimensions}",
+                ProviderName, model, stopwatch.ElapsedMilliseconds, parsed?.Embedding?.Length ?? 0);
+            return parsed?.Embedding;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            stopwatch.Stop();
+            logger.LogWarning(ex, "Embedding request failed. Provider={Provider} Model={Model} DurationMs={DurationMs}", ProviderName, model, stopwatch.ElapsedMilliseconds);
+            return null;
+        }
+    }
+
+    private async Task<LLMChatResult> SendAsync(string model, string prompt, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
         var baseUrl = options.Value.BaseUrl.TrimEnd('/');
@@ -61,7 +86,7 @@ public class OllamaService(
             new OllamaRequestOptions(options.Value.NumPredict));
         request.Content = new StringContent(JsonSerializer.Serialize(body, JsonOptions), Encoding.UTF8, "application/json");
 
-        logger.LogInformation("Ollama request starting. Model={Model} PromptLength={PromptLength} NumPredict={NumPredict} Stream={Stream}", model, prompt.Length, options.Value.NumPredict, false);
+        logger.LogInformation("LLM request starting. Provider={Provider} Model={Model} PromptLength={PromptLength} NumPredict={NumPredict} Stream={Stream}", ProviderName, model, prompt.Length, options.Value.NumPredict, false);
         using var response = await httpClientFactory.CreateClient("Ollama").SendAsync(request, cancellationToken);
         var payload = await response.Content.ReadAsStringAsync(cancellationToken);
         stopwatch.Stop();
@@ -73,7 +98,8 @@ public class OllamaService(
         if (string.IsNullOrWhiteSpace(content))
             content = payload;
         logger.LogInformation(
-            "Ollama request completed. Model={Model} StatusCode={StatusCode} DurationMs={DurationMs} PayloadLength={PayloadLength} ResponseLength={ResponseLength} PromptTokens={PromptTokens} ResponseTokens={ResponseTokens} DoneReason={DoneReason}",
+            "LLM request completed. Provider={Provider} Model={Model} StatusCode={StatusCode} DurationMs={DurationMs} PayloadLength={PayloadLength} ResponseLength={ResponseLength} PromptTokens={PromptTokens} ResponseTokens={ResponseTokens} DoneReason={DoneReason}",
+            ProviderName,
             model,
             (int)response.StatusCode,
             stopwatch.ElapsedMilliseconds,
@@ -87,7 +113,8 @@ public class OllamaService(
             ? null
             : (ollamaResponse?.PromptEvalCount ?? 0) + (ollamaResponse?.EvalCount ?? 0);
 
-        return new OllamaChatResult(
+        return new LLMChatResult(
+            ProviderName,
             model,
             content,
             response.StatusCode,
@@ -119,4 +146,11 @@ public class OllamaService(
         [property: JsonPropertyName("done_reason")] string? DoneReason,
         [property: JsonPropertyName("prompt_eval_count")] int? PromptEvalCount,
         [property: JsonPropertyName("eval_count")] int? EvalCount);
+
+    private record EmbeddingRequest(
+        [property: JsonPropertyName("model")] string Model,
+        [property: JsonPropertyName("prompt")] string Prompt);
+
+    private record EmbeddingResponse(
+        [property: JsonPropertyName("embedding")] float[]? Embedding);
 }

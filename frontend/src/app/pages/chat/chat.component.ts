@@ -3,7 +3,7 @@ import { DatePipe } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { finalize } from "rxjs";
 import { ApiService } from "../../core/api.service";
-import { ChatResponse, ChatSession } from "../../core/models";
+import { AiApplication, ChatResponse, ChatSession } from "../../core/models";
 
 interface ChatMessage {
   id?: string;
@@ -20,155 +20,16 @@ interface ChatMessage {
 @Component({
   standalone: true,
   imports: [FormsModule, DatePipe],
-  template: ` <section class="page-head">
-      <div>
-        <!-- <span class="demo-kicker">Demo Mode</span> -->
-        <h2>Secure AI Chat</h2>
-        <!-- <p>
-          Run the sample prompts to populate the dashboard with real SQLite
-          request data.
-        </p> -->
-      </div>
-      <button
-        class="button secondary"
-        type="button"
-        (click)="newChat()"
-        [disabled]="loading"
-      >
-        ＋ New chat
-      </button>
-    </section>
-
-    <section class="chat-layout">
-      <aside class="panel sessions-panel">
-        <h3>Chats</h3>
-        <div class="session-list">
-          @for (session of sessions; track session.id) {
-            <button
-              type="button"
-              [class.active]="session.id === activeSessionId"
-              (click)="selectSession(session.id)"
-              [disabled]="loading"
-            >
-              <b>{{ session.title }}</b>
-              <span>{{ session.updatedAtUtc | date: "short" }}</span>
-            </button>
-          } @empty {
-            <p>No chats yet.</p>
-          }
-        </div>
-      </aside>
-
-      <article class="panel chat-panel">
-        <div class="chat-messages" #messagesEl>
-          @for (message of messages; track $index) {
-            <div [class]="'message ' + message.role">
-              <div
-                class="bubble"
-                [class.loading]="message.loading"
-                [class.error]="message.error"
-              >
-                @if (message.loading) {
-                  <span class="typing"><i></i><i></i><i></i></span>
-                }
-                <p>{{ message.content }}</p>
-                @if (message.badges?.length) {
-                  <div class="badge-row">
-                    @for (badge of message.badges; track badge.label) {
-                      <span [class]="'badge ' + badge.tone">{{
-                        badge.label
-                      }}</span>
-                    }
-                  </div>
-                }
-                @if (message.createdAtUtc) {
-                  <small>{{ message.createdAtUtc | date: "short" }}</small>
-                }
-                @if (message.meta) {
-                  <small>{{ message.meta }}</small>
-                }
-                @if (message.findings?.length) {
-                  <div class="finding-list">
-                    @for (finding of message.findings; track finding) {
-                      <span>{{ finding }}</span>
-                    }
-                  </div>
-                }
-              </div>
-            </div>
-          }
-        </div>
-
-        <form class="composer" (ngSubmit)="send()">
-          <textarea
-            name="prompt"
-            [(ngModel)]="prompt"
-            [disabled]="loading"
-            placeholder="Ask the local model something..."
-            rows="4"
-          ></textarea>
-          <div class="composer-actions">
-            <select name="model" [(ngModel)]="model" [disabled]="loading">
-              <option value="llama3.2:1b">llama3.2:1b</option>
-              <option value="qwen2.5:0.5b">qwen2.5:0.5b (faster)</option>
-            </select>
-            <button
-              class="button primary"
-              [disabled]="loading || !prompt.trim()"
-            >
-              {{ loading ? "Thinking..." : "Send" }}
-            </button>
-          </div>
-        </form>
-      </article>
-
-      <aside class="panel helper-panel">
-        <h3>Try these</h3>
-        <button
-          class="prompt-chip safe"
-          type="button"
-          (click)="useSafe()"
-          [disabled]="loading"
-        >
-          <b>Safe request</b><span>Allowed by policy</span>
-        </button>
-        <button
-          class="prompt-chip danger"
-          type="button"
-          (click)="useRisky()"
-          [disabled]="loading"
-        >
-          <b>Sensitive request</b><span>SSN + password blocked</span>
-        </button>
-        <button
-          class="prompt-chip semantic"
-          type="button"
-          (click)="useSemanticSeed()"
-          [disabled]="loading"
-        >
-          <b>Semantic cache seed</b><span>First request creates cache</span>
-        </button>
-        <button
-          class="prompt-chip semantic"
-          type="button"
-          (click)="useSemanticFollowup()"
-          [disabled]="loading"
-        >
-          <b>Semantic cache follow-up</b
-          ><span>Similar prompt for cache hit</span>
-        </button>
-        <p>
-          Dashboard cards update from real request logs: policy, tokens,
-          response time, similarity score, and cache hit or miss.
-        </p>
-      </aside>
-    </section>`,
+  templateUrl: "./chat.component.html",
 })
 export class ChatComponent {
   private api = inject(ApiService);
   @ViewChild("messagesEl") private messagesEl?: ElementRef<HTMLElement>;
   prompt = "";
+  provider = "Ollama";
   model = "llama3.2:1b";
+  selectedApplicationId?: string;
+  applications: AiApplication[] = [];
   loading = false;
   sessions: ChatSession[] = [];
   activeSessionId?: string;
@@ -176,11 +37,12 @@ export class ChatComponent {
     {
       role: "system",
       content:
-        "Welcome. I scan prompts before forwarding allowed requests to local Ollama.",
+        "Welcome. I scan prompts before forwarding allowed requests to model.",
     },
   ];
 
   constructor() {
+    this.loadApplications();
     this.loadSessions();
   }
 
@@ -228,7 +90,13 @@ export class ChatComponent {
     this.scrollToBottom();
 
     this.api
-      .sendChat({ message, model: this.model, sessionId: this.activeSessionId })
+      .sendChat({
+        message,
+        provider: this.provider,
+        model: this.model,
+        sessionId: this.activeSessionId,
+        applicationId: this.selectedApplicationId,
+      })
       .pipe(finalize(() => (this.loading = false)))
       .subscribe({
         next: (response) =>
@@ -249,12 +117,31 @@ export class ChatComponent {
 
   useSafe() {
     this.prompt =
-      "Explain how to reset a laptop password in three short bullets.";
+      "Explain the purpose of an API gateway in three short bullet points.";
   }
 
   useRisky() {
+    this.selectApplicationByName("HR Assistant");
     this.prompt =
       "Send email to hr@company.com about employee SSN 123-45-6789 and password=Secret123";
+  }
+
+  useFinancePrompt() {
+    this.selectApplicationByName("Finance Assistant");
+    this.prompt =
+      "Review this payment note for card 4111 1111 1111 1111 before sending it to accounting.";
+  }
+
+  useCodePrompt() {
+    this.selectApplicationByName("Code Assistant");
+    this.prompt =
+      "Review this TypeScript function for readability and suggest two safe improvements.";
+  }
+
+  useServiceDeskPrompt() {
+    this.selectApplicationByName("Service Desk Agent");
+    this.prompt =
+      "Create a service desk ticket for a user who needs help resetting their account password.";
   }
 
   useSemanticSeed() {
@@ -262,7 +149,8 @@ export class ChatComponent {
   }
 
   useSemanticFollowup() {
-    this.prompt = "Explain how to reset a forgotten password in three simple steps.";
+    this.prompt =
+      "Explain how to reset a forgotten password in three simple steps.";
   }
 
   private replaceThinking(
@@ -365,7 +253,26 @@ export class ChatComponent {
         : response.cacheHit
           ? "cache hit"
           : "cache miss";
-    return `${response.status} · ${cache} · policy: ${response.policyAction} · model: ${response.model} · risk: ${response.riskScore} · ${tokens} · ${gateway} · ${policy} · ${ollama} · ${db} · ${Math.round(clientElapsedMs)} ms browser`;
+    const application = response.applicationName
+      ? `app: ${response.applicationName}`
+      : "app: unknown";
+    return `${response.status} · ${cache} · ${application} · policy: ${response.policyAction} · provider: ${response.provider} · model: ${response.model} · risk: ${response.riskScore} · ${tokens} · ${gateway} · ${policy} · ${ollama} · ${db} · ${Math.round(clientElapsedMs)} ms browser`;
+  }
+
+  private loadApplications() {
+    this.api.applications().subscribe((applications) => {
+      this.applications = applications.filter((application) => application.enabled);
+      if (!this.selectedApplicationId) {
+        this.selectedApplicationId =
+          this.applications.find((application) => application.name === "AI Chat Portal")?.id ??
+          this.applications[0]?.id;
+      }
+    });
+  }
+
+  private selectApplicationByName(name: string) {
+    const application = this.applications.find((item) => item.name === name);
+    if (application) this.selectedApplicationId = application.id;
   }
 
   private loadSessions(selectFirst = true) {

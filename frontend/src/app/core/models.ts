@@ -1,7 +1,10 @@
 export interface ChatRequest {
   message: string;
   model?: string;
+  provider?: string;
   sessionId?: string;
+  applicationId?: string;
+  appKey?: string;
 }
 
 export interface SensitiveFinding {
@@ -10,9 +13,33 @@ export interface SensitiveFinding {
   description: string;
 }
 
+export interface PolicyRuleMatch {
+  ruleId: string;
+  name: string;
+  severity: string;
+  outcome: string;
+  explanation: string;
+}
+
+export interface PolicySimulationResponse {
+  decision: 'Allow' | 'Mask' | 'Block';
+  riskScore: number;
+  reason?: string;
+  promptPreview: string;
+  maskedPreview?: string;
+  matchedRules: PolicyRuleMatch[];
+  findings: SensitiveFinding[];
+}
+
 export interface ChatResponse {
   requestId: string;
   sessionId: string;
+  applicationId?: string;
+  applicationKey?: string;
+  applicationName?: string;
+  applicationOwner?: string;
+  applicationEnvironment?: string;
+  provider: string;
   model: string;
   status: string;
   policyAction: string;
@@ -43,6 +70,12 @@ export interface ChatResponse {
 export interface ChatHistoryItem {
   id: string;
   timestampUtc: string;
+  applicationId?: string;
+  applicationKey?: string;
+  applicationName?: string;
+  applicationOwner?: string;
+  applicationEnvironment?: string;
+  provider: string;
   model: string;
   status: string;
   policyAction: string;
@@ -64,7 +97,50 @@ export interface ChatHistoryItem {
   semanticCacheHit: boolean;
   similarityScore?: number;
   errorMessage?: string;
+  matchedPolicyName?: string;
   findingCount: number;
+}
+
+export interface SecurityPolicy {
+  id: string;
+  name: string;
+  description: string;
+  findingType: string;
+  action: "Allow" | "Mask" | "Block";
+  riskScore: number;
+  enabled: boolean;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+export interface SecurityPolicyRequest {
+  name: string;
+  description?: string;
+  findingType: string;
+  action: "Allow" | "Mask" | "Block";
+  riskScore: number;
+  enabled: boolean;
+}
+
+export interface AiApplication {
+  id: string;
+  appKey: string;
+  name: string;
+  owner: string;
+  environment: "Dev" | "Test" | "Prod";
+  description: string;
+  enabled: boolean;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+export interface AiApplicationRequest {
+  name: string;
+  owner: string;
+  environment: "Dev" | "Test" | "Prod";
+  description?: string;
+  appKey?: string;
+  enabled: boolean;
 }
 
 export interface Dashboard {
@@ -85,9 +161,18 @@ export interface Dashboard {
   exactCacheHitCount: number;
   semanticCacheHitCount: number;
   cacheMissCount: number;
+  blockedSecretsCount: number;
+  providerUsage: { provider: string; count: number }[];
+  averageDurationByProvider: { provider: string; averageDurationMs: number }[];
+  tokensByProvider: { provider: string; llmTokensUsed: number; tokensSaved: number }[];
+  applicationUsage: { applicationName: string; environment: string; count: number }[];
+  violationsByApplication: { applicationName: string; environment: string; count: number }[];
+  tokensByApplication: { applicationName: string; environment: string; llmTokensUsed: number; tokensSaved: number }[];
+  averageDurationByApplication: { applicationName: string; environment: string; averageDurationMs: number }[];
   modelUsage: { model: string; count: number }[];
   policyActions: { action: string; count: number }[];
   findingTypes: { type: string; count: number }[];
+  recentHighRiskRequests: ChatHistoryItem[];
   recentRequests: ChatHistoryItem[];
 }
 

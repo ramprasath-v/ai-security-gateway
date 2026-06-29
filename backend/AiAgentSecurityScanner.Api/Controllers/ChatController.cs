@@ -17,10 +17,18 @@ public class ChatController(IChatGatewayService chatGateway, AppDbContext db, IL
         if (string.IsNullOrWhiteSpace(request.Message))
             return BadRequest(new { error = "Message is required." });
 
-        var response = await chatGateway.SendAsync(
-            request,
-            HttpContext.Connection.RemoteIpAddress?.ToString(),
-            cancellationToken);
+        ChatResponse response;
+        try
+        {
+            response = await chatGateway.SendAsync(
+                request,
+                HttpContext.Connection.RemoteIpAddress?.ToString(),
+                cancellationToken);
+        }
+        catch (ApplicationValidationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
+        }
 
         logger.LogInformation(
             "Chat API returning response. RequestId={RequestId} ResponseLengthReturnedByApi={ResponseLengthReturnedByApi} CacheHit={CacheHit}",
@@ -34,13 +42,20 @@ public class ChatController(IChatGatewayService chatGateway, AppDbContext db, IL
     [HttpGet("history")]
     public async Task<ActionResult<IReadOnlyList<ChatHistoryItemDto>>> History(CancellationToken cancellationToken)
     {
-        var items = await db.ChatRequestLogs
+        var rows = await db.ChatRequestLogs
             .AsNoTracking()
             .OrderByDescending(x => x.TimestampUtc)
             .Take(50)
-            .Select(x => new ChatHistoryItemDto(
+            .Select(x => new
+            {
                 x.Id,
                 x.TimestampUtc,
+                x.ApplicationId,
+                x.ApplicationKey,
+                x.ApplicationName,
+                x.ApplicationOwner,
+                x.ApplicationEnvironment,
+                x.Provider,
                 x.Model,
                 x.Status,
                 x.PolicyAction,
@@ -54,16 +69,53 @@ public class ChatController(IChatGatewayService chatGateway, AppDbContext db, IL
                 x.PromptTokens,
                 x.ResponseTokens,
                 x.TotalTokens,
-                x.LlmTokensUsed > 0 ? x.LlmTokensUsed : (!x.CacheHit ? (x.TotalTokens ?? 0) : 0),
-                x.TokensSaved > 0 ? x.TokensSaved : (x.CacheHit ? (x.PromptTokens ?? 0) + (x.ResponseTokens ?? 0) : 0),
-                x.CachedTokensServed > 0 ? x.CachedTokensServed : (x.CacheHit ? (x.PromptTokens ?? 0) + (x.ResponseTokens ?? 0) : 0),
+                LlmTokensUsed = x.LlmTokensUsed > 0 ? x.LlmTokensUsed : (!x.CacheHit ? (x.TotalTokens ?? 0) : 0),
+                TokensSaved = x.TokensSaved > 0 ? x.TokensSaved : (x.CacheHit ? (x.PromptTokens ?? 0) + (x.ResponseTokens ?? 0) : 0),
+                CachedTokensServed = x.CachedTokensServed > 0 ? x.CachedTokensServed : (x.CacheHit ? (x.PromptTokens ?? 0) + (x.ResponseTokens ?? 0) : 0),
                 x.CacheHit,
                 x.ExactCacheHit,
                 x.SemanticCacheHit,
                 x.SimilarityScore,
                 x.ErrorMessage,
-                x.Findings.Count))
+                x.MatchedPolicyName,
+                FindingCount = x.Findings.Count
+            })
             .ToListAsync(cancellationToken);
+
+        var items = rows
+            .Select(x => new ChatHistoryItemDto(
+                x.Id,
+                UtcDateTime.FromStorage(x.TimestampUtc),
+                x.ApplicationId,
+                x.ApplicationKey,
+                x.ApplicationName,
+                x.ApplicationOwner,
+                x.ApplicationEnvironment,
+                x.Provider,
+                x.Model,
+                x.Status,
+                x.PolicyAction,
+                x.RiskScore,
+                x.PromptPreview,
+                x.ResponsePreview,
+                x.TotalDurationMs,
+                x.OllamaDurationMs,
+                x.PromptLength,
+                x.ResponseLength,
+                x.PromptTokens,
+                x.ResponseTokens,
+                x.TotalTokens,
+                x.LlmTokensUsed,
+                x.TokensSaved,
+                x.CachedTokensServed,
+                x.CacheHit,
+                x.ExactCacheHit,
+                x.SemanticCacheHit,
+                x.SimilarityScore,
+                x.ErrorMessage,
+                x.MatchedPolicyName,
+                x.FindingCount))
+            .ToList();
 
         return Ok(items);
     }
@@ -71,11 +123,15 @@ public class ChatController(IChatGatewayService chatGateway, AppDbContext db, IL
     [HttpGet("sessions")]
     public async Task<ActionResult<IReadOnlyList<ChatSessionDto>>> Sessions(CancellationToken cancellationToken)
     {
-        var sessions = await db.ChatSessions
+        var rows = await db.ChatSessions
             .AsNoTracking()
             .OrderByDescending(x => x.UpdatedAtUtc)
-            .Select(x => new ChatSessionDto(x.Id, x.Title, x.CreatedAtUtc, x.UpdatedAtUtc))
+            .Select(x => new { x.Id, x.Title, x.CreatedAtUtc, x.UpdatedAtUtc })
             .ToListAsync(cancellationToken);
+
+        var sessions = rows
+            .Select(x => new ChatSessionDto(x.Id, x.Title, UtcDateTime.FromStorage(x.CreatedAtUtc), UtcDateTime.FromStorage(x.UpdatedAtUtc)))
+            .ToList();
 
         return Ok(sessions);
     }
@@ -89,17 +145,18 @@ public class ChatController(IChatGatewayService chatGateway, AppDbContext db, IL
         };
         db.ChatSessions.Add(session);
         await db.SaveChangesAsync(cancellationToken);
-        return Ok(new ChatSessionDto(session.Id, session.Title, session.CreatedAtUtc, session.UpdatedAtUtc));
+        return Ok(new ChatSessionDto(session.Id, session.Title, UtcDateTime.FromStorage(session.CreatedAtUtc), UtcDateTime.FromStorage(session.UpdatedAtUtc)));
     }
 
     [HttpGet("sessions/{id:guid}/messages")]
     public async Task<ActionResult<IReadOnlyList<ChatMessageDto>>> SessionMessages(Guid id, CancellationToken cancellationToken)
     {
-        var messages = await db.ChatMessages
+        var rows = await db.ChatMessages
             .AsNoTracking()
             .Where(x => x.SessionId == id)
             .OrderBy(x => x.CreatedAtUtc)
-            .Select(x => new ChatMessageDto(
+            .Select(x => new
+            {
                 x.Id,
                 x.SessionId,
                 x.Role,
@@ -108,8 +165,22 @@ public class ChatController(IChatGatewayService chatGateway, AppDbContext db, IL
                 x.Model,
                 x.PolicyDecision,
                 x.RiskScore,
-                x.RequestId))
+                x.RequestId
+            })
             .ToListAsync(cancellationToken);
+
+        var messages = rows
+            .Select(x => new ChatMessageDto(
+                x.Id,
+                x.SessionId,
+                x.Role,
+                x.Content,
+                UtcDateTime.FromStorage(x.CreatedAtUtc),
+                x.Model,
+                x.PolicyDecision,
+                x.RiskScore,
+                x.RequestId))
+            .ToList();
 
         return Ok(messages);
     }

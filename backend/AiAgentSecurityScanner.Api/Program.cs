@@ -1,4 +1,5 @@
 using AiAgentSecurityScanner.Api.Data;
+using AiAgentSecurityScanner.Api.Models;
 using AiAgentSecurityScanner.Api.Services;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,12 +9,14 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 builder.Services.AddScoped<IAiSecurityDetectionService, AiSecurityDetectionService>();
 builder.Services.AddScoped<IPolicyService, PolicyService>();
-builder.Services.AddScoped<IOllamaService, OllamaService>();
+builder.Services.AddScoped<ILLMProvider, OllamaLLMProvider>();
+builder.Services.AddScoped<ILLMProviderResolver, LLMProviderResolver>();
 builder.Services.AddScoped<IPromptNormalizer, PromptNormalizer>();
-builder.Services.AddScoped<IOllamaEmbeddingService, OllamaEmbeddingService>();
 builder.Services.AddScoped<ISemanticCacheService, SemanticCacheService>();
 builder.Services.AddScoped<IChatGatewayService, ChatGatewayService>();
+builder.Services.Configure<LLMProviderOptions>(builder.Configuration.GetSection(LLMProviderOptions.SectionName));
 builder.Services.Configure<OllamaOptions>(builder.Configuration.GetSection(OllamaOptions.SectionName));
+builder.Services.Configure<OpenAIOptions>(builder.Configuration.GetSection(OpenAIOptions.SectionName));
 builder.Services.Configure<AiSecurityPolicyOptions>(builder.Configuration.GetSection(AiSecurityPolicyOptions.SectionName));
 builder.Services.Configure<SemanticCacheOptions>(builder.Configuration.GetSection(SemanticCacheOptions.SectionName));
 builder.Services.AddHttpClient("Ollama", client =>
@@ -39,6 +42,8 @@ var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 await db.Database.EnsureCreatedAsync();
 await EnsureSqliteColumnsAsync(db);
 await EnsureChatTablesAsync(db);
+await EnsureSecurityPoliciesAsync(db);
+await EnsureApplicationsAsync(db);
 
 app.Run();
 
@@ -73,6 +78,12 @@ static async Task EnsureSqliteColumnsAsync(AppDbContext db)
         ["SimilarityScore"] = "REAL NULL",
         ["CacheKey"] = "TEXT NULL",
         ["WasBlockedBeforeModelCall"] = "INTEGER NOT NULL DEFAULT 0",
+        ["ApplicationId"] = "TEXT NULL",
+        ["ApplicationKey"] = "TEXT NULL",
+        ["ApplicationName"] = "TEXT NULL",
+        ["ApplicationOwner"] = "TEXT NULL",
+        ["ApplicationEnvironment"] = "TEXT NULL",
+        ["Provider"] = "TEXT NOT NULL DEFAULT 'Ollama'",
         ["RequestStartedAt"] = "TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'",
         ["RequestCompletedAt"] = "TEXT NULL",
         ["DurationMs"] = "INTEGER NULL",
@@ -80,6 +91,7 @@ static async Task EnsureSqliteColumnsAsync(AppDbContext db)
         ["DatabaseDurationMs"] = "INTEGER NULL",
         ["PromptLength"] = "INTEGER NOT NULL DEFAULT 0",
         ["ResponseLength"] = "INTEGER NOT NULL DEFAULT 0",
+        ["MatchedPolicyName"] = "TEXT NULL",
         ["ErrorMessage"] = "TEXT NULL"
     };
 
@@ -89,6 +101,170 @@ static async Task EnsureSqliteColumnsAsync(AppDbContext db)
         var sql = "ALTER TABLE ChatRequestLogs ADD COLUMN " + name + " " + definition + ";";
         await db.Database.ExecuteSqlRawAsync(sql);
     }
+}
+
+static async Task EnsureApplicationsAsync(AppDbContext db)
+{
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS AiApplications (
+            Id TEXT NOT NULL CONSTRAINT PK_AiApplications PRIMARY KEY,
+            AppKey TEXT NOT NULL,
+            Name TEXT NOT NULL,
+            Owner TEXT NOT NULL,
+            Environment TEXT NOT NULL,
+            Description TEXT NOT NULL,
+            Enabled INTEGER NOT NULL,
+            CreatedAtUtc TEXT NOT NULL,
+            UpdatedAtUtc TEXT NOT NULL
+        );
+        """);
+
+    await db.Database.ExecuteSqlRawAsync("CREATE UNIQUE INDEX IF NOT EXISTS IX_AiApplications_AppKey ON AiApplications (AppKey);");
+    await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_AiApplications_Enabled ON AiApplications (Enabled);");
+    await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ChatRequestLogs_ApplicationId ON ChatRequestLogs (ApplicationId);");
+    await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ChatRequestLogs_ApplicationName ON ChatRequestLogs (ApplicationName);");
+
+    if (await db.AiApplications.AnyAsync()) return;
+
+    var now = DateTime.UtcNow;
+    db.AiApplications.AddRange(
+        new AiApplication
+        {
+            AppKey = "ai-chat-portal",
+            Name = "AI Chat Portal",
+            Owner = "IT",
+            Environment = "Dev",
+            Description = "Default demo chat application.",
+            Enabled = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        },
+        new AiApplication
+        {
+            AppKey = "hr-assistant",
+            Name = "HR Assistant",
+            Owner = "HR",
+            Environment = "Test",
+            Description = "HR prompt testing application.",
+            Enabled = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        },
+        new AiApplication
+        {
+            AppKey = "service-desk-agent",
+            Name = "Service Desk Agent",
+            Owner = "IT Operations",
+            Environment = "Dev",
+            Description = "Service desk agent test harness.",
+            Enabled = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        },
+        new AiApplication
+        {
+            AppKey = "code-assistant",
+            Name = "Code Assistant",
+            Owner = "Engineering",
+            Environment = "Dev",
+            Description = "Engineering code assistant demo.",
+            Enabled = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        },
+        new AiApplication
+        {
+            AppKey = "finance-assistant",
+            Name = "Finance Assistant",
+            Owner = "Finance",
+            Environment = "Test",
+            Description = "Finance assistant policy demo.",
+            Enabled = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        },
+        new AiApplication
+        {
+            AppKey = "customer-support-bot",
+            Name = "Customer Support Bot",
+            Owner = "Support",
+            Environment = "Dev",
+            Description = "Customer support bot demo.",
+            Enabled = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        });
+    await db.SaveChangesAsync();
+}
+
+static async Task EnsureSecurityPoliciesAsync(AppDbContext db)
+{
+    await db.Database.ExecuteSqlRawAsync("""
+        CREATE TABLE IF NOT EXISTS SecurityPolicies (
+            Id TEXT NOT NULL CONSTRAINT PK_SecurityPolicies PRIMARY KEY,
+            Name TEXT NOT NULL,
+            Description TEXT NOT NULL,
+            FindingType TEXT NOT NULL,
+            Action TEXT NOT NULL,
+            RiskScore INTEGER NOT NULL,
+            Enabled INTEGER NOT NULL,
+            CreatedAtUtc TEXT NOT NULL,
+            UpdatedAtUtc TEXT NOT NULL
+        );
+        """);
+
+    await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_SecurityPolicies_FindingType ON SecurityPolicies (FindingType);");
+    await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_SecurityPolicies_Enabled ON SecurityPolicies (Enabled);");
+
+    if (await db.SecurityPolicies.AnyAsync()) return;
+
+    var now = DateTime.UtcNow;
+    db.SecurityPolicies.AddRange(
+        new SecurityPolicy
+        {
+            Name = "Block SSN",
+            Description = "Block prompts containing Social Security numbers.",
+            FindingType = "SSN",
+            Action = "Block",
+            RiskScore = 90,
+            Enabled = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        },
+        new SecurityPolicy
+        {
+            Name = "Block API Keys",
+            Description = "Block prompts containing API keys or credential-like secrets.",
+            FindingType = "API Key",
+            Action = "Block",
+            RiskScore = 95,
+            Enabled = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        },
+        new SecurityPolicy
+        {
+            Name = "Mask Email",
+            Description = "Mask email addresses before prompts are sent to the model.",
+            FindingType = "Email",
+            Action = "Mask",
+            RiskScore = 30,
+            Enabled = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        },
+        new SecurityPolicy
+        {
+            Name = "Mask Phone",
+            Description = "Mask phone numbers before prompts are sent to the model.",
+            FindingType = "Phone",
+            Action = "Mask",
+            RiskScore = 35,
+            Enabled = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        });
+    await db.SaveChangesAsync();
 }
 
 static async Task EnsureChatTablesAsync(AppDbContext db)

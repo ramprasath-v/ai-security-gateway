@@ -1,0 +1,110 @@
+<section class="page-head">
+  <div>
+    <h2>Applications</h2>
+  </div>
+  <button class="button secondary" type="button" (click)="loadApplications()" [disabled]="loading">
+    Refresh
+  </button>
+</section>
+
+@if (error) {
+  <p class="error-banner">{{ error }}</p>
+}
+
+<section class="policy-builder-layout">
+  <article class="panel">
+    <h3>{{ editingId ? "Edit application" : "Add application" }}</h3>
+    <form class="policy-form" (ngSubmit)="save()">
+      <label>
+        <span>Name</span>
+        <input name="name" [(ngModel)]="form.name" [disabled]="saving" required />
+      </label>
+      <div class="form-grid">
+        <label>
+          <span>Owner</span>
+          <input name="owner" [(ngModel)]="form.owner" [disabled]="saving" required />
+        </label>
+        <label>
+          <span>Environment</span>
+          <select name="environment" [(ngModel)]="form.environment" [disabled]="saving">
+            @for (environment of environments; track environment) {
+              <option [value]="environment">{{ environment }}</option>
+            }
+          </select>
+        </label>
+      </div>
+      <label>
+        <span>Application key</span>
+        <input name="appKey" [(ngModel)]="form.appKey" [disabled]="saving" />
+      </label>
+      <label>
+        <span>Description</span>
+        <textarea
+          name="description"
+          [(ngModel)]="form.description"
+          [disabled]="saving"
+          rows="3"
+        ></textarea>
+      </label>
+      <label class="check-row">
+        <input name="enabled" type="checkbox" [(ngModel)]="form.enabled" [disabled]="saving" />
+        <span>Enabled</span>
+      </label>
+      <div class="composer-actions">
+        <button class="button primary" type="submit" [disabled]="saving || !form.name.trim() || !form.owner.trim()">
+          {{ saving ? "Saving..." : editingId ? "Update application" : "Add application" }}
+        </button>
+        @if (editingId) {
+          <button class="button secondary" type="button" (click)="cancelEdit()" [disabled]="saving">
+            Cancel
+          </button>
+        }
+      </div>
+    </form>
+  </article>
+
+  <article class="panel">
+    <h3>Registered applications</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Owner</th>
+            <th>Environment</th>
+            <th>App key</th>
+            <th>Enabled</th>
+            <th>Description</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (application of applications; track application.id) {
+            <tr>
+              <td>{{ application.name }}</td>
+              <td>{{ application.owner }}</td>
+              <td>
+                <span [class]="'badge ' + environmentTone(application.environment)">
+                  {{ application.environment }}
+                </span>
+              </td>
+              <td>{{ application.appKey }}</td>
+              <td>{{ application.enabled ? "Yes" : "No" }}</td>
+              <td class="preview">{{ application.description || "—" }}</td>
+              <td class="row-actions">
+                <button class="button secondary" type="button" (click)="edit(application)">Edit</button>
+                <button class="button secondary" type="button" (click)="delete(application)">Delete</button>
+              </td>
+            </tr>
+          } @empty {
+            <tr>
+              <td colspan="7" class="empty">
+                {{ loading ? "Loading applications..." : "No applications yet." }}
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </article>
+</section>
