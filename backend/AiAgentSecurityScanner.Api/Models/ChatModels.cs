@@ -21,6 +21,7 @@ public class ChatRequestLog
     public bool SemanticCacheHit { get; set; }
     public double? SimilarityScore { get; set; }
     public string? CacheKey { get; set; }
+    public string? MatchedCachePrompt { get; set; }
     public bool WasBlockedBeforeModelCall { get; set; }
     public Guid? ApplicationId { get; set; }
     public string? ApplicationKey { get; set; }
@@ -29,6 +30,8 @@ public class ChatRequestLog
     public string? ApplicationEnvironment { get; set; }
     public required string Model { get; set; }
     public string Provider { get; set; } = "Ollama";
+    public string? PromptText { get; set; }
+    public string? ResponseText { get; set; }
     public required string PromptPreview { get; set; }
     public string? ResponsePreview { get; set; }
     public int PromptLength { get; set; }

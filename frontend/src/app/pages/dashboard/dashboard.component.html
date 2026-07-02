@@ -140,7 +140,7 @@
   </p>
 
   <section class="dashboard-grid">
-    <article class="panel">
+    <article class="panel recent-panel">
       <h3>Requests by application</h3>
       @for (item of d.applicationUsage; track item.applicationName + item.environment) {
         <div class="metric-row">
@@ -274,94 +274,131 @@
 
     <article class="panel">
       <h3>Recent requests</h3>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Local time</th>
-              <th>Prompt preview</th>
-              <th>Application</th>
-              <th>Provider</th>
-              <th>Model</th>
-              <th>Policy</th>
-              <th>Matched policy</th>
-              <th>Risk</th>
-              <th>Total ms</th>
-              <th>Ollama ms</th>
-              <th>Prompt tokens</th>
-              <th>Response tokens</th>
-              <th>LLM tokens used</th>
-              <th>Tokens saved</th>
-              <th>Cached tokens served</th>
-              <th>Cache</th>
-              <th>Similarity</th>
-              <th>Status / error</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (item of d.recentRequests; track item.id) {
-              <tr>
-                <td>{{ item.timestampUtc | date: "short" }}</td>
-                <td class="preview">{{ item.promptPreview }}</td>
-                <td>{{ item.applicationName || "—" }}</td>
-                <td>{{ item.provider }}</td>
-                <td>{{ item.model }}</td>
-                <td>
-                  <span [class]="'badge ' + policyTone(item.policyAction)">
-                    {{ item.policyAction }}
-                  </span>
-                </td>
-                <td>{{ item.matchedPolicyName || "—" }}</td>
-                <td>{{ item.riskScore }}</td>
-                <td [class]="durationTone(item.totalDurationMs)">
-                  {{ item.totalDurationMs ?? 0 }}
-                </td>
-                <td [class]="durationTone(item.ollamaDurationMs)">
-                  {{ item.ollamaDurationMs ?? "—" }}
-                </td>
-                <td>{{ item.promptTokens ?? "—" }}</td>
-                <td>{{ item.responseTokens ?? "—" }}</td>
-                <td>{{ item.llmTokensUsed }}</td>
-                <td>{{ item.tokensSaved }}</td>
-                <td>{{ item.cachedTokensServed }}</td>
-                <td>
-                  <span [class]="item.cacheHit ? 'pill hit' : 'pill miss'">
-                    {{
-                      item.exactCacheHit
-                        ? "exact"
-                        : item.semanticCacheHit
-                          ? "semantic"
-                          : item.cacheHit
-                            ? "hit"
-                            : "miss"
-                    }}
-                  </span>
-                </td>
-                <td>
-                  <span
-                    [class]="
-                      item.semanticCacheHit ? 'similarity hot' : 'similarity'
-                    "
-                  >
-                    {{
-                      item.similarityScore == null
-                        ? "—"
-                        : (item.similarityScore | number: "1.2-3")
-                    }}
-                  </span>
-                </td>
-                <td class="error-cell">
-                  {{ item.errorMessage || item.status }}
-                </td>
-              </tr>
-            } @empty {
-              <tr>
-                <td colspan="18" class="empty">No requests yet.</td>
-              </tr>
-            }
-          </tbody>
-        </table>
+      <div class="responsive-table recent-table">
+        <div class="table-header">
+          <span>Local time</span>
+          <span>Application</span>
+          <span>Prompt preview</span>
+          <span>Policy decision</span>
+          <span>Cache</span>
+          <span>Duration</span>
+          <span>View details</span>
+        </div>
+        @for (item of d.recentRequests; track item.id) {
+          <div class="table-row">
+            <span data-label="Local time">{{ item.timestampUtc | date: "short" }}</span>
+            <span data-label="Application">{{ item.applicationName || "Unknown" }}</span>
+            <span class="request-preview" data-label="Prompt">{{ item.promptPreview }}</span>
+            <span data-label="Policy">
+              <span [class]="'badge ' + policyTone(item.policyAction)">
+                {{ item.policyAction }}
+              </span>
+            </span>
+            <span data-label="Cache">
+              <span [class]="cacheTone(item)">{{ cacheLabel(item) }}</span>
+            </span>
+            <span [class]="durationTone(item.totalDurationMs)" data-label="Duration">
+              {{ item.totalDurationMs ?? 0 }} ms
+            </span>
+            <span data-label="Details">
+              <button class="button secondary compact" type="button" (click)="openDetails(item)">
+                Details
+              </button>
+            </span>
+          </div>
+        } @empty {
+          <p class="empty">No requests yet.</p>
+        }
       </div>
     </article>
   </section>
+
+  @if (detailLoading || detailError || selectedRequest) {
+    <div class="detail-backdrop" (click)="closeDetails()">
+      <article class="detail-dialog" (click)="$event.stopPropagation()">
+        <div class="detail-head">
+          <div>
+            <span class="eyebrow">REQUEST DETAIL</span>
+            <h3>{{ selectedRequest?.applicationName || "Request" }}</h3>
+          </div>
+          <button class="button secondary compact" type="button" (click)="closeDetails()">Close</button>
+        </div>
+
+        @if (detailLoading) {
+          <p class="empty"><span class="spinner"></span>Loading request details...</p>
+        } @else if (detailError) {
+          <p class="error-banner">{{ detailError }}</p>
+        } @else {
+          @if (selectedRequest; as detail) {
+            <section class="detail-grid">
+            <div class="detail-card wide">
+              <h4>Prompt</h4>
+              <pre>{{ detail.prompt }}</pre>
+            </div>
+            <div class="detail-card wide">
+              <h4>Response</h4>
+              <pre>{{ detail.response || "—" }}</pre>
+            </div>
+            <div class="detail-card">
+              <h4>Provider / model</h4>
+              <p>{{ detail.provider }} / {{ detail.model }}</p>
+            </div>
+            <div class="detail-card">
+              <h4>Policy</h4>
+              <p>
+                <span [class]="'badge ' + policyTone(detail.policyAction)">
+                  {{ detail.policyAction }}
+                </span>
+              </p>
+              <small>{{ detail.policyReason || "No policy reason recorded." }}</small>
+            </div>
+            <div class="detail-card">
+              <h4>Risk score</h4>
+              <p>{{ detail.riskScore }}</p>
+            </div>
+            <div class="detail-card">
+              <h4>Cache</h4>
+              <p><span [class]="cacheTone(detail)">{{ cacheLabel(detail) }}</span></p>
+              <small>Similarity: {{ detail.similarityScore == null ? "—" : (detail.similarityScore | number: "1.2-3") }}</small>
+            </div>
+            <div class="detail-card wide">
+              <h4>Sensitive findings</h4>
+              @for (finding of detail.findings; track finding.type + finding.description) {
+                <div class="finding-detail">
+                  <b>{{ finding.severity }} · {{ finding.type }}</b>
+                  <span>{{ finding.description }}</span>
+                </div>
+              } @empty {
+                <p>No sensitive findings.</p>
+              }
+            </div>
+            <div class="detail-card wide">
+              <h4>Matched rules</h4>
+              <p>{{ detail.matchedPolicyName || "No matched policy recorded." }}</p>
+              <small>{{ detail.policyReason || "Detector findings are listed above." }}</small>
+            </div>
+            <div class="detail-card wide">
+              <h4>Matched prompt</h4>
+              <pre>{{ detail.matchedCachePrompt || "—" }}</pre>
+            </div>
+            <div class="detail-card">
+              <h4>Tokens</h4>
+              <p>{{ tokenSummary(detail) }}</p>
+              <small>Prompt: {{ detail.promptTokens ?? "—" }} · Response: {{ detail.responseTokens ?? "—" }} · Total: {{ detail.totalTokens ?? "—" }}</small>
+            </div>
+            <div class="detail-card">
+              <h4>Duration breakdown</h4>
+              <p>{{ detail.totalDurationMs ?? 0 }} ms total</p>
+              <small>Policy: {{ detail.policyCheckDurationMs ?? "—" }} ms · Model: {{ detail.ollamaDurationMs ?? "—" }} ms · DB: {{ detail.databaseDurationMs ?? "—" }} ms</small>
+            </div>
+            <div class="detail-card wide">
+              <h4>Error message</h4>
+              <pre>{{ detail.errorMessage || "—" }}</pre>
+            </div>
+            </section>
+          }
+        }
+      </article>
+    </div>
+  }
 }

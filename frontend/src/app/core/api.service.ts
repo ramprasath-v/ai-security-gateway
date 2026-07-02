@@ -1,7 +1,7 @@
 import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../environments/environment';
-import { AiApplication, AiApplicationRequest, ChatRequest, ChatResponse, ChatHistoryItem, ChatSession, Dashboard, PolicySimulationResponse, SecurityPolicy, SecurityPolicyRequest, StoredChatMessage } from './models';
+import { AiApplication, AiApplicationRequest, ChatRequest, ChatResponse, ChatHistoryItem, ChatSession, Dashboard, DashboardRequestDetail, PolicySimulationResponse, SecurityPolicy, SecurityPolicyRequest, StoredChatMessage } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -29,6 +29,10 @@ export class ApiService {
   }
 
   dashboard() { return this.http.get<Dashboard>(`${this.base}/dashboard`); }
+
+  dashboardRequest(id: string) {
+    return this.http.get<DashboardRequestDetail>(`${this.base}/dashboard/requests/${id}`);
+  }
 
   simulatePolicy(prompt: string) {
     return this.http.post<PolicySimulationResponse>(`${this.base}/policy-simulator`, { prompt });

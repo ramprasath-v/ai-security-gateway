@@ -8,6 +8,55 @@ namespace AiAgentSecurityScanner.Api.Controllers;
 [ApiController, Route("api/dashboard")]
 public class DashboardController(AppDbContext db) : ControllerBase
 {
+    [HttpGet("requests/{id:guid}")]
+    public async Task<ActionResult<DashboardRequestDetailDto>> GetRequest(Guid id, CancellationToken cancellationToken)
+    {
+        var row = await db.ChatRequestLogs
+            .AsNoTracking()
+            .Include(x => x.Findings)
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+        if (row is null) return NotFound(new { error = "Request not found." });
+
+        return Ok(new DashboardRequestDetailDto(
+            row.Id,
+            UtcDateTime.FromStorage(row.TimestampUtc),
+            row.ApplicationId,
+            row.ApplicationKey,
+            row.ApplicationName,
+            row.ApplicationOwner,
+            row.ApplicationEnvironment,
+            row.Provider,
+            row.Model,
+            row.Status,
+            row.PolicyAction,
+            row.PolicyReason,
+            row.MatchedPolicyName,
+            row.RiskScore,
+            row.PromptText ?? row.PromptPreview,
+            row.ResponseText ?? row.ResponsePreview,
+            row.PromptLength,
+            row.ResponseLength,
+            row.PromptTokens,
+            row.ResponseTokens,
+            row.TotalTokens,
+            row.LlmTokensUsed > 0 ? row.LlmTokensUsed : (!row.CacheHit ? (row.TotalTokens ?? 0) : 0),
+            row.TokensSaved > 0 ? row.TokensSaved : (row.CacheHit ? (row.PromptTokens ?? 0) + (row.ResponseTokens ?? 0) : 0),
+            row.CachedTokensServed > 0 ? row.CachedTokensServed : (row.CacheHit ? (row.PromptTokens ?? 0) + (row.ResponseTokens ?? 0) : 0),
+            row.CacheHit,
+            row.ExactCacheHit,
+            row.SemanticCacheHit,
+            row.SimilarityScore,
+            row.CacheKey,
+            row.MatchedCachePrompt,
+            row.WasBlockedBeforeModelCall,
+            row.TotalDurationMs,
+            row.PolicyCheckDurationMs,
+            row.OllamaDurationMs,
+            row.DatabaseDurationMs,
+            row.ErrorMessage,
+            row.Findings.Select(x => new SensitiveFindingDto(x.Type, x.Severity, x.Description)).ToList()));
+    }
+
     [HttpGet]
     public async Task<ActionResult<DashboardDto>> Get(CancellationToken cancellationToken)
     {

@@ -101,6 +101,18 @@ export interface ChatHistoryItem {
   findingCount: number;
 }
 
+export interface DashboardRequestDetail extends ChatHistoryItem {
+  policyReason?: string;
+  prompt: string;
+  response?: string;
+  cacheKey?: string;
+  matchedCachePrompt?: string;
+  wasBlockedBeforeModelCall: boolean;
+  policyCheckDurationMs?: number;
+  databaseDurationMs?: number;
+  findings: SensitiveFinding[];
+}
+
 export interface SecurityPolicy {
   id: string;
   name: string;

@@ -17,6 +17,7 @@ public record SemanticCacheLookupResult(
     int? ResponseTokens,
     int? TotalTokens,
     string? CacheKey,
+    string? MatchedPrompt,
     string NormalizedPrompt,
     float[]? Embedding);
 
@@ -44,7 +45,7 @@ public class SemanticCacheService(
         {
             stopwatch.Stop();
             logger.LogInformation("Semantic cache lookup disabled. Provider={Provider} Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs}", provider, model, policyDecision, stopwatch.ElapsedMilliseconds);
-            return new(false, false, false, null, null, null, null, null, cacheKey, normalized, null);
+            return new(false, false, false, null, null, null, null, null, cacheKey, null, normalized, null);
         }
 
         var exactMatches = await db.SemanticCacheEntries
@@ -59,7 +60,7 @@ public class SemanticCacheService(
         {
             stopwatch.Stop();
             logger.LogInformation("Semantic cache lookup complete. Result=ExactHit Provider={Provider} Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs} CachedResponseLength={CachedResponseLength}", provider, model, policyDecision, stopwatch.ElapsedMilliseconds, exact.CachedResponse.Length);
-            return new(true, true, false, 1.0, exact.CachedResponse, exact.PromptTokens, exact.ResponseTokens, exact.TotalTokens, cacheKey, normalized, null);
+            return new(true, true, false, 1.0, exact.CachedResponse, exact.PromptTokens, exact.ResponseTokens, exact.TotalTokens, cacheKey, exact.OriginalPrompt, normalized, null);
         }
 
         if (exactMatches.Count > 0)
@@ -77,7 +78,7 @@ public class SemanticCacheService(
         {
             stopwatch.Stop();
             logger.LogInformation("Semantic cache lookup complete. Result=MissNoEmbedding Provider={Provider} Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs}", provider, model, policyDecision, stopwatch.ElapsedMilliseconds);
-            return new(false, false, false, null, null, null, null, null, cacheKey, normalized, null);
+            return new(false, false, false, null, null, null, null, null, cacheKey, null, normalized, null);
         }
 
         var candidates = await db.SemanticCacheEntries
@@ -115,12 +116,12 @@ public class SemanticCacheService(
         {
             stopwatch.Stop();
             logger.LogInformation("Semantic cache lookup complete. Result=SemanticHit Provider={Provider} Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs} Similarity={Similarity} CandidateCount={CandidateCount} SkippedTruncatedCandidates={SkippedTruncatedCandidates} CachedResponseLength={CachedResponseLength}", provider, model, policyDecision, stopwatch.ElapsedMilliseconds, bestScore, candidates.Count, skippedTruncatedCandidates, best.CachedResponse.Length);
-            return new(true, false, true, bestScore, best.CachedResponse, best.PromptTokens, best.ResponseTokens, best.TotalTokens, cacheKey, normalized, embedding);
+            return new(true, false, true, bestScore, best.CachedResponse, best.PromptTokens, best.ResponseTokens, best.TotalTokens, cacheKey, best.OriginalPrompt, normalized, embedding);
         }
 
         stopwatch.Stop();
         logger.LogInformation("Semantic cache lookup complete. Result=Miss Provider={Provider} Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs} BestSimilarity={Similarity} CandidateCount={CandidateCount} SkippedTruncatedCandidates={SkippedTruncatedCandidates}", provider, model, policyDecision, stopwatch.ElapsedMilliseconds, best is null ? null : bestScore, candidates.Count, skippedTruncatedCandidates);
-        return new(false, false, false, best is null ? null : bestScore, null, null, null, null, cacheKey, normalized, embedding);
+        return new(false, false, false, best is null ? null : bestScore, null, null, null, null, cacheKey, best?.OriginalPrompt, normalized, embedding);
     }
 
     public Task SaveAsync(string originalPrompt, string normalizedPrompt, float[]? embedding, string response, string provider, string model, string policyDecision, int? promptTokens, int? responseTokens, int? totalTokens, CancellationToken cancellationToken)
