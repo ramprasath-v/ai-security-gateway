@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 using AiAgentSecurityScanner.Api.Data;
 using AiAgentSecurityScanner.Api.DTOs;
@@ -35,7 +37,7 @@ public partial class ChatGatewayService(
         var requestedModel = string.IsNullOrWhiteSpace(request.Model) ? llmProvider.ModelName : request.Model.Trim();
         var application = await ResolveApplicationAsync(request.ApplicationId, request.AppKey, cancellationToken);
 
-        var session = await GetOrCreateSessionAsync(request.SessionId, prompt, cancellationToken);
+        var session = await GetOrCreateSessionAsync(request.SessionId, prompt, application, cancellationToken);
         db.ChatMessages.Add(new ChatMessage
         {
             Session = session,
@@ -70,12 +72,15 @@ public partial class ChatGatewayService(
         double? similarityScore = null;
 
         logger.LogInformation(
-            "Gateway request starting. Application={ApplicationName} ApplicationEnvironment={ApplicationEnvironment} Provider={Provider} Model={Model} PromptLength={PromptLength} PolicyAction={PolicyAction} PolicyCheckDurationMs={PolicyCheckDurationMs} RiskScore={RiskScore}",
+            "Gateway request starting. Application={ApplicationName} ApplicationKey={ApplicationKey} ApplicationEnvironment={ApplicationEnvironment} Provider={Provider} Model={Model} PromptLength={PromptLength} MessageHash={MessageHash} MessagePreview={MessagePreview} PolicyAction={PolicyAction} PolicyCheckDurationMs={PolicyCheckDurationMs} RiskScore={RiskScore}",
             application.Name,
+            application.AppKey,
             application.Environment,
             provider,
             model,
             promptLength,
+            Sha256Hex(prompt),
+            Preview(prompt),
             decision.Action,
             policyStopwatch.ElapsedMilliseconds,
             decision.RiskScore);
@@ -87,7 +92,7 @@ public partial class ChatGatewayService(
         }
         else
         {
-            cacheLookup = await semanticCacheService.LookupAsync(prompt, provider, model, decision.Action, llmProvider, cancellationToken);
+            cacheLookup = await semanticCacheService.LookupAsync(prompt, provider, model, decision.Action, application.AppKey, llmProvider, cancellationToken);
             cacheKey = cacheLookup.CacheKey;
             cacheHit = cacheLookup.CacheHit;
             exactCacheHit = cacheLookup.ExactCacheHit;
@@ -98,10 +103,13 @@ public partial class ChatGatewayService(
             {
                 responseText = cacheLookup.CachedResponse;
                 logger.LogInformation(
-                    "Gateway response served from cache. CacheKey={CacheKey} ExactCacheHit={ExactCacheHit} SemanticCacheHit={SemanticCacheHit} CachedResponseLength={CachedResponseLength}",
+                    "Gateway response served from cache. CacheKey={CacheKey} ExactCacheHit={ExactCacheHit} SemanticCacheHit={SemanticCacheHit} SimilarityScore={SimilarityScore} MatchedPromptHash={MatchedPromptHash} MatchedPromptPreview={MatchedPromptPreview} CachedResponseLength={CachedResponseLength}",
                     cacheKey,
                     exactCacheHit,
                     semanticCacheHit,
+                    similarityScore,
+                    cacheLookup.MatchedPrompt is null ? null : Sha256Hex(cacheLookup.MatchedPrompt),
+                    cacheLookup.MatchedPrompt is null ? null : Preview(cacheLookup.MatchedPrompt),
                     responseText.Length);
                 promptTokens = cacheLookup.PromptTokens;
                 responseTokens = cacheLookup.ResponseTokens;
@@ -139,6 +147,7 @@ public partial class ChatGatewayService(
                             provider,
                             model,
                             decision.Action,
+                            application.AppKey,
                             promptTokens,
                             responseTokens,
                             totalTokens,
@@ -317,7 +326,7 @@ public partial class ChatGatewayService(
         }
         else
         {
-            application = await db.AiApplications.FirstOrDefaultAsync(x => x.AppKey == "ai-chat-portal", cancellationToken);
+            application = await db.AiApplications.FirstOrDefaultAsync(x => x.AppKey == "security-gateway-chat", cancellationToken);
         }
 
         if (application is null)
@@ -329,15 +338,21 @@ public partial class ChatGatewayService(
         return application;
     }
 
-    private async Task<ChatSession> GetOrCreateSessionAsync(Guid? sessionId, string prompt, CancellationToken cancellationToken)
+    private async Task<ChatSession> GetOrCreateSessionAsync(Guid? sessionId, string prompt, AiApplication application, CancellationToken cancellationToken)
     {
         if (sessionId is not null)
         {
             var existing = await db.ChatSessions.FirstOrDefaultAsync(x => x.Id == sessionId, cancellationToken);
-            if (existing is not null) return existing;
+            if (existing is not null && existing.ApplicationId == application.Id) return existing;
         }
 
-        var session = new ChatSession { Title = BuildTitle(prompt) };
+        var session = new ChatSession
+        {
+            Title = BuildTitle(prompt),
+            ApplicationId = application.Id,
+            ApplicationKey = application.AppKey,
+            ApplicationName = application.Name
+        };
         db.ChatSessions.Add(session);
         return session;
     }
@@ -353,6 +368,18 @@ public partial class ChatGatewayService(
     {
         if (maxLength <= 0) return string.Empty;
         return value.Length <= maxLength ? value : value[..maxLength];
+    }
+
+    private static string Preview(string value)
+    {
+        value = WhitespacePattern().Replace(value.Trim(), " ");
+        return value.Length <= 300 ? value : value[..300];
+    }
+
+    private static string Sha256Hex(string value)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(hash).ToLowerInvariant();
     }
 
     private static int? TokenTotal(int? promptTokens, int? responseTokens, int? reportedTotal)

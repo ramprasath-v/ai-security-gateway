@@ -135,8 +135,10 @@ npm start
 Open:
 
 ```text
-http://localhost:4200
+http://localhost:4300
 ```
+
+The Security Gateway UI runs on port `4300`. RagApp uses port `4200`.
 
 ## Test from curl
 
@@ -146,6 +148,7 @@ Safe prompt:
 curl -X POST http://localhost:5187/api/chat \
   -H "Content-Type: application/json" \
   -d '{
+    "appKey": "security-gateway-chat",
     "model": "llama3.2:1b",
     "message": "Explain how to reset a laptop password in simple steps."
   }'
@@ -157,6 +160,7 @@ Risky prompt with PII and a secret:
 curl -X POST http://localhost:5187/api/chat \
   -H "Content-Type: application/json" \
   -d '{
+    "appKey": "security-gateway-chat",
     "model": "llama3.2:1b",
     "message": "Send email to hr@company.com about employee SSN 123-45-6789 and password=Secret123"
   }'
@@ -185,8 +189,11 @@ curl http://localhost:5187/api/chat/history
 
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/chat` | Main chat gateway endpoint used by the Angular Chat UI. |
-| `GET /api/chat/history` | Shows recent real logged chat requests. |
+| `POST /api/chat` | Main chat gateway endpoint. Use `appKey` to identify the caller, such as `security-gateway-chat` or `rag-app`. |
+| `GET /api/chat/history` | Shows recent real logged gateway requests across applications. |
+| `GET /api/chat/sessions` | Shows only built-in Security Gateway Chat UI sessions. |
+| `DELETE /api/chat/sessions` | Clears only built-in Security Gateway Chat UI sessions; audit request logs are preserved. |
+| `DELETE /api/chat/sessions/legacy` | Clears legacy/external chat-session rows from the chat UI store; audit request logs are preserved. |
 | `GET /api/dashboard` | Returns real dashboard counts from SQLite. |
 | `GET /api/health` | Health check. |
 

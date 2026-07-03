@@ -15,6 +15,14 @@
   >
     ＋ New chat
   </button>
+  <button
+    class="button secondary"
+    type="button"
+    (click)="clearChats()"
+    [disabled]="loading || !sessions.length"
+  >
+    Clear chats
+  </button>
 </section>
 
 <section class="chat-layout">
@@ -85,17 +93,6 @@
       ></textarea>
       <div class="composer-actions">
         <div class="selector-row">
-          <select
-            name="application"
-            [(ngModel)]="selectedApplicationId"
-            [disabled]="loading"
-          >
-            @for (application of applications; track application.id) {
-              <option [value]="application.id">
-                {{ application.name }} / {{ application.environment }}
-              </option>
-            }
-          </select>
           <select name="provider" [(ngModel)]="provider" [disabled]="loading">
             <option value="Ollama">Ollama</option>
           </select>
@@ -135,7 +132,7 @@
       (click)="useFinancePrompt()"
       [disabled]="loading"
     >
-      <b>Finance Assistant</b><span>Credit card policy test</span>
+      <b>Payment note</b><span>Credit card policy test</span>
     </button>
     <button
       class="prompt-chip safe"
@@ -143,7 +140,7 @@
       (click)="useCodePrompt()"
       [disabled]="loading"
     >
-      <b>Code Assistant</b><span>Safe code review prompt</span>
+      <b>Code review</b><span>Safe review prompt</span>
     </button>
     <button
       class="prompt-chip safe"
@@ -151,7 +148,7 @@
       (click)="useServiceDeskPrompt()"
       [disabled]="loading"
     >
-      <b>Service Desk Agent</b><span>Password reset ticket prompt</span>
+      <b>Service desk</b><span>Password reset ticket prompt</span>
     </button>
     <button
       class="prompt-chip semantic"

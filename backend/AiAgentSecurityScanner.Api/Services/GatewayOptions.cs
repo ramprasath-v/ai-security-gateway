@@ -40,6 +40,6 @@ public class SemanticCacheOptions
 {
     public const string SectionName = "SemanticCache";
     public bool Enabled { get; set; } = true;
-    public string EmbeddingModel { get; set; } = "nomic-embed-text";    
+    public string EmbeddingModel { get; set; } = "nomic-embed-text";
     public double SimilarityThreshold { get; set; } = 0.80;
 }

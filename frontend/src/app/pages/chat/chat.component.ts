@@ -3,7 +3,7 @@ import { DatePipe } from "@angular/common";
 import { FormsModule } from "@angular/forms";
 import { finalize } from "rxjs";
 import { ApiService } from "../../core/api.service";
-import { AiApplication, ChatResponse, ChatSession } from "../../core/models";
+import { ChatResponse, ChatSession } from "../../core/models";
 
 interface ChatMessage {
   id?: string;
@@ -23,13 +23,12 @@ interface ChatMessage {
   templateUrl: "./chat.component.html",
 })
 export class ChatComponent {
+  private readonly gatewayChatAppKey = "security-gateway-chat";
   private api = inject(ApiService);
   @ViewChild("messagesEl") private messagesEl?: ElementRef<HTMLElement>;
   prompt = "";
   provider = "Ollama";
   model = "llama3.2:1b";
-  selectedApplicationId?: string;
-  applications: AiApplication[] = [];
   loading = false;
   sessions: ChatSession[] = [];
   activeSessionId?: string;
@@ -42,7 +41,6 @@ export class ChatComponent {
   ];
 
   constructor() {
-    this.loadApplications();
     this.loadSessions();
   }
 
@@ -95,7 +93,7 @@ export class ChatComponent {
         provider: this.provider,
         model: this.model,
         sessionId: this.activeSessionId,
-        applicationId: this.selectedApplicationId,
+        appKey: this.gatewayChatAppKey,
       })
       .pipe(finalize(() => (this.loading = false)))
       .subscribe({
@@ -121,25 +119,21 @@ export class ChatComponent {
   }
 
   useRisky() {
-    this.selectApplicationByName("HR Assistant");
     this.prompt =
       "Send email to hr@company.com about employee SSN 123-45-6789 and password=Secret123";
   }
 
   useFinancePrompt() {
-    this.selectApplicationByName("Finance Assistant");
     this.prompt =
       "Review this payment note for card 4111 1111 1111 1111 before sending it to accounting.";
   }
 
   useCodePrompt() {
-    this.selectApplicationByName("Code Assistant");
     this.prompt =
       "Review this TypeScript function for readability and suggest two safe improvements.";
   }
 
   useServiceDeskPrompt() {
-    this.selectApplicationByName("Service Desk Agent");
     this.prompt =
       "Create a service desk ticket for a user who needs help resetting their account password.";
   }
@@ -259,20 +253,18 @@ export class ChatComponent {
     return `${response.status} · ${cache} · ${application} · policy: ${response.policyAction} · provider: ${response.provider} · model: ${response.model} · risk: ${response.riskScore} · ${tokens} · ${gateway} · ${policy} · ${ollama} · ${db} · ${Math.round(clientElapsedMs)} ms browser`;
   }
 
-  private loadApplications() {
-    this.api.applications().subscribe((applications) => {
-      this.applications = applications.filter((application) => application.enabled);
-      if (!this.selectedApplicationId) {
-        this.selectedApplicationId =
-          this.applications.find((application) => application.name === "AI Chat Portal")?.id ??
-          this.applications[0]?.id;
-      }
+  clearChats() {
+    if (this.loading) return;
+    this.api.clearChatSessions().subscribe(() => {
+      this.sessions = [];
+      this.activeSessionId = undefined;
+      this.messages = [
+        {
+          role: "system",
+          content: "Security Gateway Chat messages were cleared. Audit logs were preserved.",
+        },
+      ];
     });
-  }
-
-  private selectApplicationByName(name: string) {
-    const application = this.applications.find((item) => item.name === name);
-    if (application) this.selectedApplicationId = application.id;
   }
 
   private loadSessions(selectFirst = true) {

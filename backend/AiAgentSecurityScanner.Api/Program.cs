@@ -2,6 +2,7 @@ using AiAgentSecurityScanner.Api.Data;
 using AiAgentSecurityScanner.Api.Models;
 using AiAgentSecurityScanner.Api.Services;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddControllers();
@@ -27,7 +28,11 @@ builder.Services.AddHttpClient("Ollama", client =>
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 builder.Services.AddCors(options => options.AddPolicy("Frontend", policy => policy
-    .WithOrigins("http://localhost:4200", "http://127.0.0.1:4200")
+    .WithOrigins(
+        "http://localhost:4300",
+        "http://127.0.0.1:4300",
+        "http://localhost:4200",
+        "http://127.0.0.1:4200")
     .AllowAnyHeader().AllowAnyMethod()));
 
 var app = builder.Build();
@@ -106,6 +111,30 @@ static async Task EnsureSqliteColumnsAsync(AppDbContext db)
     }
 }
 
+static async Task EnsureSqliteColumnAsync(AppDbContext db, string tableName, string columnName, string definition)
+{
+    var connection = db.Database.GetDbConnection();
+    if (connection.State != ConnectionState.Open)
+    {
+        await connection.OpenAsync();
+    }
+
+    await using (var command = connection.CreateCommand())
+    {
+        command.CommandText = $"PRAGMA table_info('{tableName}');";
+        await using var reader = await command.ExecuteReaderAsync();
+        while (await reader.ReadAsync())
+        {
+            if (string.Equals(reader.GetString(1), columnName, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+        }
+    }
+
+    await db.Database.ExecuteSqlRawAsync("ALTER TABLE " + tableName + " ADD COLUMN " + columnName + " " + definition + ";");
+}
+
 static async Task EnsureApplicationsAsync(AppDbContext db)
 {
     await db.Database.ExecuteSqlRawAsync("""
@@ -127,77 +156,69 @@ static async Task EnsureApplicationsAsync(AppDbContext db)
     await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ChatRequestLogs_ApplicationId ON ChatRequestLogs (ApplicationId);");
     await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ChatRequestLogs_ApplicationName ON ChatRequestLogs (ApplicationName);");
 
-    if (await db.AiApplications.AnyAsync()) return;
-
     var now = DateTime.UtcNow;
-    db.AiApplications.AddRange(
+    var seedApplications = new[]
+    {
         new AiApplication
         {
-            AppKey = "ai-chat-portal",
-            Name = "AI Chat Portal",
+            AppKey = "security-gateway-chat",
+            Name = "Security Gateway Chat",
             Owner = "IT",
             Environment = "Dev",
-            Description = "Default demo chat application.",
+            Description = "Built-in Security Gateway chat UI.",
             Enabled = true,
             CreatedAtUtc = now,
             UpdatedAtUtc = now
         },
         new AiApplication
         {
-            AppKey = "hr-assistant",
-            Name = "HR Assistant",
-            Owner = "HR",
+            AppKey = "rag-app",
+            Name = "RagApp",
+            Owner = "Knowledge Platform",
+            Environment = "Dev",
+            Description = "Secure RAG assistant client application.",
+            Enabled = true,
+            CreatedAtUtc = now,
+            UpdatedAtUtc = now
+        },
+        new AiApplication
+        {
+            AppKey = "sample-app",
+            Name = "Sample App",
+            Owner = "Demo",
             Environment = "Test",
-            Description = "HR prompt testing application.",
+            Description = "Sample external client for testing application controls.",
             Enabled = true,
             CreatedAtUtc = now,
             UpdatedAtUtc = now
-        },
-        new AiApplication
-        {
-            AppKey = "service-desk-agent",
-            Name = "Service Desk Agent",
-            Owner = "IT Operations",
-            Environment = "Dev",
-            Description = "Service desk agent test harness.",
-            Enabled = true,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now
-        },
-        new AiApplication
-        {
-            AppKey = "code-assistant",
-            Name = "Code Assistant",
-            Owner = "Engineering",
-            Environment = "Dev",
-            Description = "Engineering code assistant demo.",
-            Enabled = true,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now
-        },
-        new AiApplication
-        {
-            AppKey = "finance-assistant",
-            Name = "Finance Assistant",
-            Owner = "Finance",
-            Environment = "Test",
-            Description = "Finance assistant policy demo.",
-            Enabled = true,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now
-        },
-        new AiApplication
-        {
-            AppKey = "customer-support-bot",
-            Name = "Customer Support Bot",
-            Owner = "Support",
-            Environment = "Dev",
-            Description = "Customer support bot demo.",
-            Enabled = true,
-            CreatedAtUtc = now,
-            UpdatedAtUtc = now
-        });
+        }
+    };
+
+    foreach (var seedApplication in seedApplications)
+    {
+        if (await db.AiApplications.AnyAsync(x => x.AppKey == seedApplication.AppKey)) continue;
+        db.AiApplications.Add(seedApplication);
+    }
+
     await db.SaveChangesAsync();
+
+    var oldSeedAppKeys = new[]
+    {
+        "ai-chat-portal",
+        "hr-assistant",
+        "service-desk-agent",
+        "code-assistant",
+        "finance-assistant",
+        "customer-support-bot"
+    };
+    var oldSeedApps = await db.AiApplications
+        .Where(x => oldSeedAppKeys.Contains(x.AppKey))
+        .ToListAsync();
+    if (oldSeedApps.Count > 0)
+    {
+        db.AiApplications.RemoveRange(oldSeedApps);
+        await db.SaveChangesAsync();
+    }
 }
 
 static async Task EnsureSecurityPoliciesAsync(AppDbContext db)
@@ -276,6 +297,9 @@ static async Task EnsureChatTablesAsync(AppDbContext db)
         CREATE TABLE IF NOT EXISTS ChatSessions (
             Id TEXT NOT NULL CONSTRAINT PK_ChatSessions PRIMARY KEY,
             Title TEXT NOT NULL,
+            ApplicationId TEXT NULL,
+            ApplicationKey TEXT NULL,
+            ApplicationName TEXT NULL,
             CreatedAtUtc TEXT NOT NULL,
             UpdatedAtUtc TEXT NOT NULL
         );
@@ -297,6 +321,10 @@ static async Task EnsureChatTablesAsync(AppDbContext db)
         """);
 
     await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ChatSessions_UpdatedAtUtc ON ChatSessions (UpdatedAtUtc);");
+    await EnsureSqliteColumnAsync(db, "ChatSessions", "ApplicationId", "TEXT NULL");
+    await EnsureSqliteColumnAsync(db, "ChatSessions", "ApplicationKey", "TEXT NULL");
+    await EnsureSqliteColumnAsync(db, "ChatSessions", "ApplicationName", "TEXT NULL");
+    await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ChatSessions_ApplicationKey_UpdatedAtUtc ON ChatSessions (ApplicationKey, UpdatedAtUtc);");
     await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ChatMessages_SessionId_CreatedAtUtc ON ChatMessages (SessionId, CreatedAtUtc);");
     await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ChatRequestLogs_CacheKey ON ChatRequestLogs (CacheKey);");
     await db.Database.ExecuteSqlRawAsync("CREATE INDEX IF NOT EXISTS IX_ChatRequestLogs_CacheHit ON ChatRequestLogs (CacheHit);");

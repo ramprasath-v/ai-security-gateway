@@ -1,0 +1,89 @@
+<section class="page-head">
+  <div>
+    <span class="demo-kicker">Developer Tools</span>
+    <h2>Admin</h2>
+    <p>Reset demo data while preserving applications, policies, and users.</p>
+  </div>
+</section>
+
+@if (error) {
+  <p class="error-banner">{{ error }}</p>
+}
+
+<article class="panel admin-panel">
+  <h3>Reset Demo Environment</h3>
+  <p>
+    Clears semantic cache, Security Gateway chat history, request logs, and sensitive-data findings.
+    Application registrations and security policies are left intact.
+  </p>
+
+  <label>
+    <span>Confirmation phrase</span>
+    <input
+      name="confirmation"
+      [(ngModel)]="confirmation"
+      [disabled]="resetting"
+      autocomplete="off"
+      placeholder="RESET DEMO"
+    />
+  </label>
+
+  <div class="composer-actions">
+    <button
+      class="button primary danger-button"
+      type="button"
+      (click)="resetDemoEnvironment()"
+      [disabled]="resetting || clearingCache || confirmation !== requiredConfirmation"
+    >
+      {{ resetting ? "Resetting..." : "Reset Demo Environment" }}
+    </button>
+    <button
+      class="button secondary"
+      type="button"
+      (click)="clearSemanticCache()"
+      [disabled]="resetting || clearingCache || confirmation !== requiredConfirmation"
+    >
+      {{ clearingCache ? "Clearing..." : "Clear Semantic Cache" }}
+    </button>
+  </div>
+
+  @if (cacheResult) {
+    <section class="reset-summary">
+      <strong>{{ cacheResult.message }}</strong>
+      <dl>
+        <div>
+          <dt>Semantic cache</dt>
+          <dd>{{ cacheResult.semanticCacheEntriesCleared }}</dd>
+        </div>
+      </dl>
+    </section>
+  }
+
+  @if (result) {
+    <section class="reset-summary">
+      <strong>{{ result.message }}</strong>
+      <dl>
+        <div>
+          <dt>Semantic cache</dt>
+          <dd>{{ result.semanticCacheEntriesCleared }}</dd>
+        </div>
+        <div>
+          <dt>Chat sessions</dt>
+          <dd>{{ result.chatSessionsCleared }}</dd>
+        </div>
+        <div>
+          <dt>Chat messages</dt>
+          <dd>{{ result.chatMessagesCleared }}</dd>
+        </div>
+        <div>
+          <dt>Request logs</dt>
+          <dd>{{ result.requestLogsCleared }}</dd>
+        </div>
+        <div>
+          <dt>Findings</dt>
+          <dd>{{ result.sensitiveDataFindingsCleared }}</dd>
+        </div>
+      </dl>
+    </section>
+  }
+</article>

@@ -11,6 +11,8 @@ namespace AiAgentSecurityScanner.Api.Controllers;
 [Route("api/chat")]
 public class ChatController(IChatGatewayService chatGateway, AppDbContext db, ILogger<ChatController> logger) : ControllerBase
 {
+    private const string SecurityGatewayChatAppKey = "security-gateway-chat";
+
     [HttpPost]
     public async Task<ActionResult<ChatResponse>> Send(ChatRequest request, CancellationToken cancellationToken)
     {
@@ -125,12 +127,20 @@ public class ChatController(IChatGatewayService chatGateway, AppDbContext db, IL
     {
         var rows = await db.ChatSessions
             .AsNoTracking()
+            .Where(x => x.ApplicationKey == SecurityGatewayChatAppKey)
             .OrderByDescending(x => x.UpdatedAtUtc)
-            .Select(x => new { x.Id, x.Title, x.CreatedAtUtc, x.UpdatedAtUtc })
+            .Select(x => new { x.Id, x.Title, x.CreatedAtUtc, x.UpdatedAtUtc, x.ApplicationId, x.ApplicationKey, x.ApplicationName })
             .ToListAsync(cancellationToken);
 
         var sessions = rows
-            .Select(x => new ChatSessionDto(x.Id, x.Title, UtcDateTime.FromStorage(x.CreatedAtUtc), UtcDateTime.FromStorage(x.UpdatedAtUtc)))
+            .Select(x => new ChatSessionDto(
+                x.Id,
+                x.Title,
+                UtcDateTime.FromStorage(x.CreatedAtUtc),
+                UtcDateTime.FromStorage(x.UpdatedAtUtc),
+                x.ApplicationId,
+                x.ApplicationKey,
+                x.ApplicationName))
             .ToList();
 
         return Ok(sessions);
@@ -139,18 +149,34 @@ public class ChatController(IChatGatewayService chatGateway, AppDbContext db, IL
     [HttpPost("sessions")]
     public async Task<ActionResult<ChatSessionDto>> CreateSession(CreateChatSessionRequest request, CancellationToken cancellationToken)
     {
+        var application = await GetSecurityGatewayChatApplicationAsync(cancellationToken);
         var session = new ChatSession
         {
-            Title = string.IsNullOrWhiteSpace(request.Title) ? "New chat" : request.Title.Trim()
+            Title = string.IsNullOrWhiteSpace(request.Title) ? "New chat" : request.Title.Trim(),
+            ApplicationId = application.Id,
+            ApplicationKey = application.AppKey,
+            ApplicationName = application.Name
         };
         db.ChatSessions.Add(session);
         await db.SaveChangesAsync(cancellationToken);
-        return Ok(new ChatSessionDto(session.Id, session.Title, UtcDateTime.FromStorage(session.CreatedAtUtc), UtcDateTime.FromStorage(session.UpdatedAtUtc)));
+        return Ok(new ChatSessionDto(
+            session.Id,
+            session.Title,
+            UtcDateTime.FromStorage(session.CreatedAtUtc),
+            UtcDateTime.FromStorage(session.UpdatedAtUtc),
+            session.ApplicationId,
+            session.ApplicationKey,
+            session.ApplicationName));
     }
 
     [HttpGet("sessions/{id:guid}/messages")]
     public async Task<ActionResult<IReadOnlyList<ChatMessageDto>>> SessionMessages(Guid id, CancellationToken cancellationToken)
     {
+        var belongsToSecurityGatewayChat = await db.ChatSessions
+            .AsNoTracking()
+            .AnyAsync(x => x.Id == id && x.ApplicationKey == SecurityGatewayChatAppKey, cancellationToken);
+        if (!belongsToSecurityGatewayChat) return NotFound(new { error = "Chat session not found." });
+
         var rows = await db.ChatMessages
             .AsNoTracking()
             .Where(x => x.SessionId == id)
@@ -183,5 +209,46 @@ public class ChatController(IChatGatewayService chatGateway, AppDbContext db, IL
             .ToList();
 
         return Ok(messages);
+    }
+
+    [HttpDelete("sessions")]
+    public async Task<IActionResult> ClearSecurityGatewayChatSessions(CancellationToken cancellationToken)
+    {
+        var sessions = await db.ChatSessions
+            .Where(x => x.ApplicationKey == SecurityGatewayChatAppKey)
+            .ToListAsync(cancellationToken);
+
+        db.ChatSessions.RemoveRange(sessions);
+        await db.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Cleared {SessionCount} Security Gateway Chat session(s). Audit request logs were preserved.",
+            sessions.Count);
+
+        return NoContent();
+    }
+
+    [HttpDelete("sessions/legacy")]
+    public async Task<IActionResult> ClearLegacyAndExternalChatSessions(CancellationToken cancellationToken)
+    {
+        var sessions = await db.ChatSessions
+            .Where(x => x.ApplicationKey == null || x.ApplicationKey != SecurityGatewayChatAppKey)
+            .ToListAsync(cancellationToken);
+
+        db.ChatSessions.RemoveRange(sessions);
+        await db.SaveChangesAsync(cancellationToken);
+
+        logger.LogInformation(
+            "Cleared {SessionCount} legacy/external chat session(s). Audit request logs were preserved.",
+            sessions.Count);
+
+        return NoContent();
+    }
+
+    private async Task<AiApplication> GetSecurityGatewayChatApplicationAsync(CancellationToken cancellationToken)
+    {
+        return await db.AiApplications.FirstAsync(
+            x => x.AppKey == SecurityGatewayChatAppKey,
+            cancellationToken);
     }
 }

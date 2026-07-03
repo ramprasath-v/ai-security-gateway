@@ -1,5 +1,8 @@
-using System.Text.Json;
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using AiAgentSecurityScanner.Api.Data;
 using AiAgentSecurityScanner.Api.Models;
 using Microsoft.EntityFrameworkCore;
@@ -23,11 +26,11 @@ public record SemanticCacheLookupResult(
 
 public interface ISemanticCacheService
 {
-    Task<SemanticCacheLookupResult> LookupAsync(string prompt, string provider, string model, string policyDecision, ILLMProvider llmProvider, CancellationToken cancellationToken);
-    Task SaveAsync(string originalPrompt, string normalizedPrompt, float[]? embedding, string response, string provider, string model, string policyDecision, int? promptTokens, int? responseTokens, int? totalTokens, CancellationToken cancellationToken);
+    Task<SemanticCacheLookupResult> LookupAsync(string prompt, string provider, string model, string policyDecision, string applicationKey, ILLMProvider llmProvider, CancellationToken cancellationToken);
+    Task SaveAsync(string originalPrompt, string normalizedPrompt, float[]? embedding, string response, string provider, string model, string policyDecision, string applicationKey, int? promptTokens, int? responseTokens, int? totalTokens, CancellationToken cancellationToken);
 }
 
-public class SemanticCacheService(
+public partial class SemanticCacheService(
     AppDbContext db,
     IPromptNormalizer normalizer,
     IOptions<SemanticCacheOptions> options,
@@ -35,16 +38,29 @@ public class SemanticCacheService(
 {
     private const int LegacyTruncatedResponseTokenLimit = 120;
 
-    public async Task<SemanticCacheLookupResult> LookupAsync(string prompt, string provider, string model, string policyDecision, ILLMProvider llmProvider, CancellationToken cancellationToken)
+    public async Task<SemanticCacheLookupResult> LookupAsync(string prompt, string provider, string model, string policyDecision, string applicationKey, ILLMProvider llmProvider, CancellationToken cancellationToken)
     {
         var stopwatch = Stopwatch.StartNew();
-        var normalized = normalizer.Normalize(prompt);
-        var cacheModelScope = BuildCacheModelScope(provider, model);
+        var cacheText = BuildCacheComparisonText(prompt);
+        var normalized = normalizer.Normalize(cacheText.Text);
+        var promptHash = Sha256Hex(prompt);
+        var cacheTextHash = Sha256Hex(cacheText.Text);
+        var cacheModelScope = BuildCacheModelScope(provider, model, applicationKey, cacheText.ContextHash, cacheText.Kind);
         var cacheKey = $"{cacheModelScope}|{policyDecision}|{normalized}";
         if (!options.Value.Enabled)
         {
             stopwatch.Stop();
-            logger.LogInformation("Semantic cache lookup disabled. Provider={Provider} Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs}", provider, model, policyDecision, stopwatch.ElapsedMilliseconds);
+            logger.LogInformation(
+                "Semantic cache lookup disabled. Provider={Provider} Model={Model} ApplicationKey={ApplicationKey} PolicyDecision={PolicyDecision} MessageHash={MessageHash} CacheTextKind={CacheTextKind} CacheTextHash={CacheTextHash} CacheTextPreview={CacheTextPreview} DurationMs={DurationMs}",
+                provider,
+                model,
+                applicationKey,
+                policyDecision,
+                promptHash,
+                cacheText.Kind,
+                cacheTextHash,
+                Preview(cacheText.Text),
+                stopwatch.ElapsedMilliseconds);
             return new(false, false, false, null, null, null, null, null, cacheKey, null, normalized, null);
         }
 
@@ -59,7 +75,21 @@ public class SemanticCacheService(
         if (exact is not null)
         {
             stopwatch.Stop();
-            logger.LogInformation("Semantic cache lookup complete. Result=ExactHit Provider={Provider} Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs} CachedResponseLength={CachedResponseLength}", provider, model, policyDecision, stopwatch.ElapsedMilliseconds, exact.CachedResponse.Length);
+            logger.LogInformation(
+                "Semantic cache lookup complete. Result=ExactHit Provider={Provider} Model={Model} ApplicationKey={ApplicationKey} PolicyDecision={PolicyDecision} MessageHash={MessageHash} CacheTextKind={CacheTextKind} CacheTextHash={CacheTextHash} CacheTextPreview={CacheTextPreview} MatchedPromptHash={MatchedPromptHash} MatchedPromptPreview={MatchedPromptPreview} Similarity={Similarity} DurationMs={DurationMs} CachedResponseLength={CachedResponseLength}",
+                provider,
+                model,
+                applicationKey,
+                policyDecision,
+                promptHash,
+                cacheText.Kind,
+                cacheTextHash,
+                Preview(cacheText.Text),
+                Sha256Hex(exact.OriginalPrompt),
+                Preview(exact.OriginalPrompt),
+                1.0,
+                stopwatch.ElapsedMilliseconds,
+                exact.CachedResponse.Length);
             return new(true, true, false, 1.0, exact.CachedResponse, exact.PromptTokens, exact.ResponseTokens, exact.TotalTokens, cacheKey, exact.OriginalPrompt, normalized, null);
         }
 
@@ -77,7 +107,17 @@ public class SemanticCacheService(
         if (embedding is null || embedding.Length == 0)
         {
             stopwatch.Stop();
-            logger.LogInformation("Semantic cache lookup complete. Result=MissNoEmbedding Provider={Provider} Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs}", provider, model, policyDecision, stopwatch.ElapsedMilliseconds);
+            logger.LogInformation(
+                "Semantic cache lookup complete. Result=MissNoEmbedding Provider={Provider} Model={Model} ApplicationKey={ApplicationKey} PolicyDecision={PolicyDecision} MessageHash={MessageHash} CacheTextKind={CacheTextKind} CacheTextHash={CacheTextHash} CacheTextPreview={CacheTextPreview} DurationMs={DurationMs}",
+                provider,
+                model,
+                applicationKey,
+                policyDecision,
+                promptHash,
+                cacheText.Kind,
+                cacheTextHash,
+                Preview(cacheText.Text),
+                stopwatch.ElapsedMilliseconds);
             return new(false, false, false, null, null, null, null, null, cacheKey, null, normalized, null);
         }
 
@@ -115,25 +155,64 @@ public class SemanticCacheService(
         if (best is not null && bestScore >= options.Value.SimilarityThreshold)
         {
             stopwatch.Stop();
-            logger.LogInformation("Semantic cache lookup complete. Result=SemanticHit Provider={Provider} Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs} Similarity={Similarity} CandidateCount={CandidateCount} SkippedTruncatedCandidates={SkippedTruncatedCandidates} CachedResponseLength={CachedResponseLength}", provider, model, policyDecision, stopwatch.ElapsedMilliseconds, bestScore, candidates.Count, skippedTruncatedCandidates, best.CachedResponse.Length);
+            logger.LogInformation(
+                "Semantic cache lookup complete. Result=SemanticHit Provider={Provider} Model={Model} ApplicationKey={ApplicationKey} PolicyDecision={PolicyDecision} MessageHash={MessageHash} CacheTextKind={CacheTextKind} CacheTextHash={CacheTextHash} CacheTextPreview={CacheTextPreview} MatchedPromptHash={MatchedPromptHash} MatchedPromptPreview={MatchedPromptPreview} DurationMs={DurationMs} Similarity={Similarity} Threshold={Threshold} CandidateCount={CandidateCount} SkippedTruncatedCandidates={SkippedTruncatedCandidates} CachedResponseLength={CachedResponseLength}",
+                provider,
+                model,
+                applicationKey,
+                policyDecision,
+                promptHash,
+                cacheText.Kind,
+                cacheTextHash,
+                Preview(cacheText.Text),
+                Sha256Hex(best.OriginalPrompt),
+                Preview(best.OriginalPrompt),
+                stopwatch.ElapsedMilliseconds,
+                bestScore,
+                options.Value.SimilarityThreshold,
+                candidates.Count,
+                skippedTruncatedCandidates,
+                best.CachedResponse.Length);
             return new(true, false, true, bestScore, best.CachedResponse, best.PromptTokens, best.ResponseTokens, best.TotalTokens, cacheKey, best.OriginalPrompt, normalized, embedding);
         }
 
         stopwatch.Stop();
-        logger.LogInformation("Semantic cache lookup complete. Result=Miss Provider={Provider} Model={Model} PolicyDecision={PolicyDecision} DurationMs={DurationMs} BestSimilarity={Similarity} CandidateCount={CandidateCount} SkippedTruncatedCandidates={SkippedTruncatedCandidates}", provider, model, policyDecision, stopwatch.ElapsedMilliseconds, best is null ? null : bestScore, candidates.Count, skippedTruncatedCandidates);
+        logger.LogInformation(
+            "Semantic cache lookup complete. Result=Miss Provider={Provider} Model={Model} ApplicationKey={ApplicationKey} PolicyDecision={PolicyDecision} MessageHash={MessageHash} CacheTextKind={CacheTextKind} CacheTextHash={CacheTextHash} CacheTextPreview={CacheTextPreview} MatchedPromptHash={MatchedPromptHash} MatchedPromptPreview={MatchedPromptPreview} DurationMs={DurationMs} BestSimilarity={Similarity} Threshold={Threshold} CandidateCount={CandidateCount} SkippedTruncatedCandidates={SkippedTruncatedCandidates}",
+            provider,
+            model,
+            applicationKey,
+            policyDecision,
+            promptHash,
+            cacheText.Kind,
+            cacheTextHash,
+            Preview(cacheText.Text),
+            best is null ? null : Sha256Hex(best.OriginalPrompt),
+            best is null ? null : Preview(best.OriginalPrompt),
+            stopwatch.ElapsedMilliseconds,
+            best is null ? null : bestScore,
+            options.Value.SimilarityThreshold,
+            candidates.Count,
+            skippedTruncatedCandidates);
         return new(false, false, false, best is null ? null : bestScore, null, null, null, null, cacheKey, best?.OriginalPrompt, normalized, embedding);
     }
 
-    public Task SaveAsync(string originalPrompt, string normalizedPrompt, float[]? embedding, string response, string provider, string model, string policyDecision, int? promptTokens, int? responseTokens, int? totalTokens, CancellationToken cancellationToken)
+    public Task SaveAsync(string originalPrompt, string normalizedPrompt, float[]? embedding, string response, string provider, string model, string policyDecision, string applicationKey, int? promptTokens, int? responseTokens, int? totalTokens, CancellationToken cancellationToken)
     {
         if (!options.Value.Enabled) return Task.CompletedTask;
         if (embedding is null || embedding.Length == 0) return Task.CompletedTask;
 
+        var cacheText = BuildCacheComparisonText(originalPrompt);
         logger.LogInformation(
-            "Saving complete response to semantic cache. Provider={Provider} Model={Model} PolicyDecision={PolicyDecision} ResponseLengthBeforeCaching={ResponseLengthBeforeCaching}",
+            "Saving complete response to semantic cache. Provider={Provider} Model={Model} ApplicationKey={ApplicationKey} PolicyDecision={PolicyDecision} MessageHash={MessageHash} ContextHash={ContextHash} CacheTextKind={CacheTextKind} NormalizedCacheTextHash={NormalizedCacheTextHash} ResponseLengthBeforeCaching={ResponseLengthBeforeCaching}",
             provider,
             model,
+            applicationKey,
             policyDecision,
+            Sha256Hex(originalPrompt),
+            cacheText.ContextHash,
+            cacheText.Kind,
+            Sha256Hex(normalizedPrompt),
             response.Length);
 
         db.SemanticCacheEntries.Add(new SemanticCacheEntry
@@ -142,7 +221,7 @@ public class SemanticCacheService(
             NormalizedPrompt = normalizedPrompt,
             EmbeddingJson = JsonSerializer.Serialize(embedding),
             CachedResponse = response,
-            Model = BuildCacheModelScope(provider, model),
+            Model = BuildCacheModelScope(provider, model, applicationKey, cacheText.ContextHash, cacheText.Kind),
             PolicyDecision = policyDecision,
             PromptTokens = promptTokens,
             ResponseTokens = responseTokens,
@@ -177,8 +256,43 @@ public class SemanticCacheService(
         return last is not ('.' or '!' or '?' or '"' or '\'' or ')' or ']' or '}');
     }
 
-    private static string BuildCacheModelScope(string provider, string model)
+    private static string BuildCacheModelScope(string provider, string model, string applicationKey, string contextHash, string cacheTextKind)
     {
-        return $"{provider.Trim().ToLowerInvariant()}:{model.Trim().ToLowerInvariant()}";
+        return $"v3|app:{applicationKey.Trim().ToLowerInvariant()}|provider:{provider.Trim().ToLowerInvariant()}|model:{model.Trim().ToLowerInvariant()}|kind:{cacheTextKind}|ctx:{contextHash}";
     }
+
+    private static CacheComparisonText BuildCacheComparisonText(string prompt)
+    {
+        var questionMatch = RagQuestionPattern().Match(prompt);
+        if (!questionMatch.Success) return new(prompt, "message", "no-context");
+
+        var question = questionMatch.Groups["question"].Value.Trim();
+        var contextMatch = RagContextPattern().Match(prompt);
+        var context = contextMatch.Success ? contextMatch.Groups["context"].Value.Trim() : string.Empty;
+        var contextHash = string.IsNullOrWhiteSpace(context) ? "no-context" : Sha256Hex(context);
+        return new(string.IsNullOrWhiteSpace(question) ? prompt : question, "rag-question", contextHash);
+    }
+
+    private static string Sha256Hex(string value)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(value));
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    private static string Preview(string value)
+    {
+        value = WhitespacePattern().Replace(value.Trim(), " ");
+        return value.Length <= 300 ? value : value[..300];
+    }
+
+    private sealed record CacheComparisonText(string Text, string Kind, string ContextHash);
+
+    [GeneratedRegex(@"(?is)\bQuestion:\s*(?<question>.+?)\s*$")]
+    private static partial Regex RagQuestionPattern();
+
+    [GeneratedRegex(@"(?is)\bContext:\s*(?<context>.*?)\s*\bQuestion:")]
+    private static partial Regex RagContextPattern();
+
+    [GeneratedRegex(@"\s+")]
+    private static partial Regex WhitespacePattern();
 }

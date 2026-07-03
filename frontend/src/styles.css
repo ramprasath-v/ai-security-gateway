@@ -245,6 +245,51 @@ select {
 .history b, .history span, .history small { display: block; }
 .history span, .history small { color: var(--muted); font-size: 12px; margin-top: 3px; }
 
+.admin-panel {
+  max-width: 760px;
+}
+.admin-panel p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+.admin-panel label {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  font-weight: 750;
+}
+.danger-button {
+  background: linear-gradient(135deg, #e05766, #b72e42) !important;
+  box-shadow: 0 12px 26px #dd445633 !important;
+}
+.reset-summary {
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+  padding-top: 18px;
+}
+.reset-summary dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+  margin: 14px 0 0;
+}
+.reset-summary div {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 12px;
+  background: #fbfcff;
+}
+.reset-summary dt {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+.reset-summary dd {
+  margin: 4px 0 0;
+  font-size: 22px;
+  font-weight: 850;
+}
+
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 18px; }
 .stat {
   background: #fff;

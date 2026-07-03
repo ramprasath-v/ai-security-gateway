@@ -32,6 +32,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             .HasForeignKey(x => x.ChatRequestLogId)
             .OnDelete(DeleteBehavior.Cascade);
         modelBuilder.Entity<ChatSession>().HasIndex(x => x.UpdatedAtUtc);
+        modelBuilder.Entity<ChatSession>().HasIndex(x => x.ApplicationId);
+        modelBuilder.Entity<ChatSession>().HasIndex(x => new { x.ApplicationKey, x.UpdatedAtUtc });
         modelBuilder.Entity<ChatMessage>().HasIndex(x => new { x.SessionId, x.CreatedAtUtc });
         modelBuilder.Entity<ChatMessage>()
             .HasOne(x => x.Session)

@@ -1,7 +1,7 @@
 import { inject, Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../environments/environment';
-import { AiApplication, AiApplicationRequest, ChatRequest, ChatResponse, ChatHistoryItem, ChatSession, Dashboard, DashboardRequestDetail, PolicySimulationResponse, SecurityPolicy, SecurityPolicyRequest, StoredChatMessage } from './models';
+import { AiApplication, AiApplicationRequest, ChatRequest, ChatResponse, ChatHistoryItem, ChatSession, ClearSemanticCacheResponse, Dashboard, DashboardRequestDetail, PolicySimulationResponse, ResetDemoResponse, SecurityPolicy, SecurityPolicyRequest, StoredChatMessage } from './models';
 
 @Injectable({ providedIn: 'root' })
 export class ApiService {
@@ -26,6 +26,10 @@ export class ApiService {
 
   sessionMessages(sessionId: string) {
     return this.http.get<StoredChatMessage[]>(`${this.base}/chat/sessions/${sessionId}/messages`);
+  }
+
+  clearChatSessions() {
+    return this.http.delete<void>(`${this.base}/chat/sessions`);
   }
 
   dashboard() { return this.http.get<Dashboard>(`${this.base}/dashboard`); }
@@ -68,5 +72,13 @@ export class ApiService {
 
   deleteApplication(id: string) {
     return this.http.delete<void>(`${this.base}/applications/${id}`);
+  }
+
+  resetDemoEnvironment(confirmation: string) {
+    return this.http.post<ResetDemoResponse>(`${this.base}/admin/reset-demo`, { confirmation });
+  }
+
+  clearSemanticCache(confirmation: string) {
+    return this.http.post<ClearSemanticCacheResponse>(`${this.base}/admin/clear-semantic-cache`, { confirmation });
   }
 }

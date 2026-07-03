@@ -155,6 +155,20 @@ export interface AiApplicationRequest {
   enabled: boolean;
 }
 
+export interface ResetDemoResponse {
+  semanticCacheEntriesCleared: number;
+  chatSessionsCleared: number;
+  chatMessagesCleared: number;
+  requestLogsCleared: number;
+  sensitiveDataFindingsCleared: number;
+  message: string;
+}
+
+export interface ClearSemanticCacheResponse {
+  semanticCacheEntriesCleared: number;
+  message: string;
+}
+
 export interface Dashboard {
   totalRequests: number;
   successCount: number;
@@ -193,6 +207,9 @@ export interface ChatSession {
   title: string;
   createdAtUtc: string;
   updatedAtUtc: string;
+  applicationId?: string;
+  applicationKey?: string;
+  applicationName?: string;
 }
 
 export interface StoredChatMessage {

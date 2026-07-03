@@ -14,5 +14,6 @@ export class AppComponent {
     { path: "/policy-simulator", label: "Policy Simulator", icon: "◎" },
     { path: "/policies", label: "Policies", icon: "▤" },
     { path: "/dashboard", label: "Dashboard", icon: "▦" },
+    { path: "/admin", label: "Admin", icon: "⚙" },
   ];
 }

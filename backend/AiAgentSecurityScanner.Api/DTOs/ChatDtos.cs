@@ -213,7 +213,14 @@ public record ApplicationDurationDto(string ApplicationName, string Environment,
 public record PolicyActionCountDto(string Action, int Count);
 public record SensitiveFindingCountDto(string Type, int Count);
 
-public record ChatSessionDto(Guid Id, string Title, DateTime CreatedAtUtc, DateTime UpdatedAtUtc);
+public record ChatSessionDto(
+    Guid Id,
+    string Title,
+    DateTime CreatedAtUtc,
+    DateTime UpdatedAtUtc,
+    Guid? ApplicationId,
+    string? ApplicationKey,
+    string? ApplicationName);
 
 public record ChatMessageDto(
     Guid Id,
